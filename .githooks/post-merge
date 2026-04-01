@@ -1,0 +1,20 @@
+#!/bin/sh
+#
+# .githooks/post-merge
+#
+# Runs automatically after every successful `git pull` (or `git merge`) on the
+# workspace root. Triggers update-workspace to pull updates in all nested repos
+# and clone any that are not yet present on disk.
+#
+# This hook is activated during `yarn setup` by setting:
+#   git config core.hooksPath .githooks
+#
+
+echo ""
+echo "[post-merge] Workspace updated. Syncing nested repos..."
+echo ""
+
+# Run from the workspace root regardless of where git invokes the hook.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+node scripts/update-workspace.mjs

@@ -1,0 +1,12 @@
+{
+  "name": "users-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "lint": "eslint src"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

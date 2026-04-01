@@ -1,0 +1,12 @@
+{
+  "name": "host-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "webpack serve --mode development --port 3000",
+    "build": "webpack --mode production",
+    "lint": "eslint src"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -83,3 +83,17 @@ yarn update
 After running `yarn setup` once, a `post-merge` git hook is active. Every subsequent `git pull` on the workspace will automatically call `yarn update` to keep all nested repos in sync.
 
 Refer to each project's own README for detailed instructions.
+
+---
+
+## VS Code Settings
+
+A [`.vscode/settings.json`](./.vscode/settings.json) file is committed to this repository. **Do not remove it.**
+
+The most important setting it enforces is:
+
+```json
+"git.detectSubmodules": false
+```
+
+VS Code's Source Control panel continuously scans for Git repositories inside the workspace. With a large number of nested repos cloned by `yarn setup`, this background scanning becomes extremely resource-intensive — slowing down the editor and flooding the Source Control view with unrelated repo states. Disabling submodule detection stops this entirely without affecting any other Git functionality.

@@ -1,0 +1,5 @@
+{
+  "git.detectSubmodules": false,
+  "jest.enable": false,
+  "typescript.autoClosingTags": false
+}

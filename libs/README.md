@@ -8,12 +8,12 @@ Running `yarn setup` (from the workspace root) clones all libraries listed in [c
 
 ## Libraries
 
-| Package | Type | Description |
-| ----------------------- | ---------- | ----------------------------------------------------------------- |
-| tw-common-frontend | frontend | Shared React hooks, context providers, and UI primitives |
-| tw-api-client | frontend | Typed HTTP client wrappers for all internal REST APIs |
-| tw-common-backend | backend | Shared Express middleware, JWT utilities, and error helpers |
-| tw-config | universal | Centralised environment variable loader and schema validation |
+| Package            | Type      | Description                                                   |
+| ------------------ | --------- | ------------------------------------------------------------- |
+| tw-common-frontend | frontend  | Shared React hooks, context providers, and UI primitives      |
+| tw-api-client      | frontend  | Typed HTTP client wrappers for all internal REST APIs         |
+| tw-common-backend  | backend   | Shared Express middleware, JWT utilities, and error helpers   |
+| tw-config          | universal | Centralised environment variable loader and schema validation |
 
 ---
 

@@ -23,11 +23,13 @@ host-frontend (port 3000)
 ## Microfrontend Integration
 
 The host app acts as the shell. It provides:
+
 - The application layout (header, sidebar)
 - A shared Redux store with auth state
 - React and React-DOM as shared singletons
 
 Each microfrontend:
+
 - Runs as a standalone dev server during development
 - Is consumed at runtime via Module Federation in production builds
 - Manages its own domain-specific state internally

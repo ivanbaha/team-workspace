@@ -15,7 +15,7 @@ REST API for the Products domain. Manages product catalogue, inventory levels, a
 | PUT    | /products/:id | Update a product                                     |
 | DELETE | /products/:id | Delete a product                                     |
 
-Full API contract: [docs/api-contracts.md](../../docs/api-contracts.md)
+Full API contract: [docs/architecture/api-contracts.md](../../docs/architecture/api-contracts.md)
 
 ---
 

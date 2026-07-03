@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "workspace-mcp": {
+      "command": "node",
+      "args": [
+        "./mcp/src/index.js"
+      ],
+      "autoApprove": [
+        "gitlab_get_project_info",
+        "gitlab_get_projects",
+        "gitlab_get_available_apis",
+        "gitlab_get_current_user",
+        "jira_issue_get",
+        "grafana_get_available",
+        "grafana_search_logs"
+      ]
+    }
+  }
+}

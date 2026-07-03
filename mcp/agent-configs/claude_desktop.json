@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "workspace-mcp": {
+      "command": "node",
+      "args": [
+        "/REPLACE_WITH_ABSOLUTE_PATH_TO_WORKSPACE/mcp/src/index.js"
+      ]
+    }
+  }
+}

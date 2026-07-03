@@ -31,10 +31,16 @@ if (!checkConnectivity) {
 // Connectivity check — make a lightweight HTTP request to each Grafana/Loki instance
 async function checkEnv(key, cfg) {
   const url = `${cfg.lokiUrl}/loki/api/v1/labels`;
-  const auth = Buffer.from(`${cfg.username}:${cfg.password}`).toString('base64');
+  const headers = {};
+  if (cfg.username) {
+    const auth = Buffer.from(`${cfg.username}:${cfg.password}`).toString('base64');
+    headers.Authorization = `Basic ${auth}`;
+  } else if (cfg.password || cfg.pat) {
+    headers.Authorization = `Bearer ${cfg.password || cfg.pat}`;
+  }
   try {
     const res = await fetch(url, {
-      headers: { Authorization: `Basic ${auth}` },
+      headers,
       signal: AbortSignal.timeout(5000),
     });
     return { key, lokiUrl: cfg.lokiUrl, status: res.ok ? 'ok' : `http_${res.status}` };

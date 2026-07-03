@@ -16,7 +16,7 @@ All server-side services. Each service is a standalone Node.js application with 
 - HTTP framework: Express
 - All services expose health endpoints at `GET /health`
 - Environment variables are documented in each service's `.env.example`
-- API contracts are described in [docs/api-contracts.md](../docs/api-contracts.md)
+- API contracts are described in [docs/architecture/api-contracts.md](../docs/architecture/api-contracts.md)
 
 ---
 

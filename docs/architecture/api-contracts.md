@@ -10,8 +10,8 @@ Each service is accessible at its own base URL:
 
 | Service          | Local URL             |
 | ---------------- | --------------------- |
-| users-service    | http://localhost:4001 |
-| products-service | http://localhost:4002 |
+| users-service    | <http://localhost:4001> |
+| products-service | <http://localhost:4002> |
 
 ---
 

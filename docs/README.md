@@ -1,19 +1,19 @@
-# Documentation
+# Documentation Hub
 
 Shared team knowledge base covering architecture decisions, onboarding, and cross-service conventions.
 
 ---
 
-## Contents
+## Directories
 
-- [Architecture](./architecture.md) — High-level system architecture: services, boundaries, and data flows
-- [Onboarding](./onboarding.md) — Step-by-step guide for new team members to get the workspace running locally
-- [API Contracts](./api-contracts.md) — Shared conventions for REST API design (naming, versioning, error formats)
+- [guides](./guides/README.md) — Onboarding, access requests, local setup, and tool configurations.
+- [business](./business/README.md) — Descriptions of business flows and user perspectives to understand the business purpose of the project.
+- [architecture](./architecture/README.md) — Technical details of implementations, decisions, conventions, and approaches to follow.
 
 ---
 
 ## Contribution
 
-If you add a new architectural decision, create an ADR (Architecture Decision Record) in this directory following the naming pattern `adr-NNN-short-title.md`.
+If you add a new architectural decision, create an ADR (Architecture Decision Record) in `docs/architecture/` following the naming pattern `adr-NNN-short-title.md`.
 
 Keep documentation close to the code: service-level docs belong in the service's own README, not here.

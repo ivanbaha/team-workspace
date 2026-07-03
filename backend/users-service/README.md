@@ -15,7 +15,7 @@ REST API for the Users domain. Manages user accounts, authentication tokens, and
 | PUT    | /users/:id     | Update user profile            |
 | DELETE | /users/:id     | Delete user account            |
 
-Full API contract: [docs/api-contracts.md](../../docs/api-contracts.md)
+Full API contract: [docs/architecture/api-contracts.md](../../docs/architecture/api-contracts.md)
 
 ---
 

@@ -73,15 +73,18 @@ url.searchParams.set('end', String(endMs * 1_000_000));
 url.searchParams.set('limit', String(limit));
 url.searchParams.set('direction', 'backward');
 
-const auth = Buffer.from(`${env.username}:${env.password}`).toString('base64');
+const headers = { 'Content-Type': 'application/json' };
+if (env.username) {
+  const auth = Buffer.from(`${env.username}:${env.password}`).toString('base64');
+  headers.Authorization = `Basic ${auth}`;
+} else if (env.password || env.pat) {
+  headers.Authorization = `Bearer ${env.password || env.pat}`;
+}
 
 let body;
 try {
   const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Basic ${auth}`,
-      'Content-Type': 'application/json',
-    },
+    headers,
     signal: AbortSignal.timeout(30_000),
   });
 

@@ -1,0 +1,39 @@
+{
+  "name": "workspace-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for team-workspace workflow tools including GitLab and Jira integration",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "workspace-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "start:dev": "node node_modules/@modelcontextprotocol/inspector/cli/build/cli.js node src/index.js",
+    "docs:ingest": "node scripts/ingest-docs.mjs",
+    "docs:sources": "node scripts/list-sources.mjs",
+    "docs:download-model": "node scripts/download-model.mjs",
+    "qdrant:up": "docker run -d -p 6333:6333 -p 6334:6334 -v \"$(pwd)/.qdrant-storage:/qdrant/storage\" --name workspace-docs-qdrant qdrant/qdrant:v1.12.4",
+    "qdrant:up:wslc": "wslc run -d -p 6333:6333 -p 6334:6334 -v ./.qdrant-storage:/qdrant/storage --name workspace-docs-qdrant qdrant/qdrant:v1.12.4",
+    "qdrant:down": "docker stop workspace-docs-qdrant && docker rm -f workspace-docs-qdrant",
+    "qdrant:down:wslc": "wslc container stop workspace-docs-qdrant",
+    "qdrant:logs": "docker logs workspace-docs-qdrant",
+    "qdrant:logs:wslc": "wslc container logs workspace-docs-qdrant"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "mongodb": "7.4.0",
+    "nestjs-env-getter": "1.2.0"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "4.2.0",
+    "@qdrant/js-client-rest": "1.18.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "0.22.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

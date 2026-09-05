@@ -48,21 +48,31 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 ### Scripts and Config
 
 - [scripts/README.md](./scripts/README.md) — Workspace automation scripts
-  - [setup-workspace.mjs](./scripts/setup-workspace.mjs) — First-time setup: installs the git hook and clones missing repos
-  - [update-workspace.mjs](./scripts/update-workspace.mjs) — Sync: pulls updates in existing repos, clones any that are missing
-- [.githooks/post-merge](./.githooks/post-merge) — Git hook activated by `yarn setup`; runs `yarn update` automatically after every `git pull`
+  - [setup-workspace.mjs](./scripts/setup-workspace.mjs) — Install hooks, clone/pull repos, rebuild the docs index
+  - [update-workspace.mjs](./scripts/update-workspace.mjs) — Sync: pulls existing repos, clones any that are missing
+  - [install-git-hooks.mjs](./scripts/install-git-hooks.mjs) — Point git at `.githooks/` and repair it
+  - [daily-setup-guard.mjs](./scripts/daily-setup-guard.mjs) — Once-per-day flow, triggered on folder open
+- [.githooks/](./.githooks/) — Tracked git hooks: `post-merge`, `post-rewrite`, and the shared `post-update.mjs` they delegate to
 - [configs/workspace-repos.json](./configs/workspace-repos.json) — List of repos to clone and sync (frontends, backends, libs)
+- [.vscode/tasks.json](./.vscode/tasks.json) — `folderOpen` task that runs the daily guard, plus docs-index tasks
 
 ### Documentation
 
 - [docs/README.md](./docs/README.md) — Documentation hub
-  - [Guides](./docs/guides/README.md) — Local onboarding, tool configuration, and MCP setup
+  - [Guides](./docs/guides/README.md) — Local onboarding, tool configuration, and operational runbooks
     - [Onboarding](./docs/guides/onboarding.md) — Getting started guide for new team members
     - [Workspace MCP Server](./docs/guides/mcp-server.md) — In-depth connection and setup guide for the MCP server
-  - [Business](./docs/business/README.md) — Descriptions of business flows and user perspective overview
+    - [Workspace Automation](./docs/guides/workspace-automation.md) — Git hooks, daily setup guard, change-aware index rebuilds, automation security
+    - [Docs Search Operations](./docs/guides/docs-rag-operations.md) — Health checks, symptom → cause, recovery
+    - [Evaluating Retrieval Quality](./docs/guides/docs-rag-evaluation.md) — The monthly check that search still returns good answers
+    - [Running Qdrant](./docs/guides/qdrant-runtimes.md) — Docker, Podman, WSL containers, Apple containers, or external
+  - [Business](./docs/business/README.md) — Business flows from the user's perspective
+    - [Checkout Flow](./docs/business/checkout-flow.md) — Basket to confirmed order, stage by stage
   - [Architecture](./docs/architecture/README.md) — Technical designs, conventions, and patterns
     - [Architecture Overview](./docs/architecture/architecture.md) — System architecture overview
     - [API Contracts](./docs/architecture/api-contracts.md) — Shared API conventions
+    - [Hybrid RAG over the Team Documentation](./docs/architecture/docs-rag.md) — How the agent searches these docs
+  - [SPECs](./docs/SPECs/README.md) — Feature specifications. **Deliberately excluded from the search index** — see [why](./docs/architecture/docs-rag.md#case-study-why-specs-and-tasks-are-the-worst-offenders)
 
 ### MCP Server
 
@@ -92,7 +102,14 @@ yarn update
 cd mcp && yarn install && yarn start:dev
 ```
 
-After running `yarn setup` once, a `post-merge` git hook is active. Every subsequent `git pull` on the workspace will automatically call `yarn update` to keep all nested repos in sync.
+After running `yarn setup` once, the tracked git hooks are active. Every
+subsequent `git pull` on the workspace automatically syncs the nested repos —
+and, if the pull brought changed documentation, rebuilds the AI search index in
+the background. Both `post-merge` and `post-rewrite` are installed, so the
+automation works whether your team merges or rebases on pull.
+
+Repair the hooks at any time with `yarn hooks:install`. See
+[Workspace Automation](./docs/guides/workspace-automation.md) for what runs when.
 
 Refer to each project's own README for detailed instructions.
 
@@ -122,11 +139,58 @@ To set up the MCP server:
    - **Claude Desktop**: Copy the block from `mcp/agent-configs/claude_desktop.json` to your Claude Desktop config file (substituting your actual workspace path).
    - **VS Code Cline**: Copy the block from `mcp/agent-configs/cline.json` to your Cline MCP settings (substituting your actual workspace path).
 4. **(Optional) Enable Hybrid Docs Search**:
-   - Start Docker Desktop or local daemon.
+   - Start Docker Desktop or the local daemon.
    - In your `.env`, set `DOCS_SEARCH_ENABLED=true` and `QDRANT_ENGINE='docker'`.
-   - Reconnect the server; it will automatically spin up Qdrant and index your files.
+   - Reconnect the server; it spins up Qdrant and indexes your files automatically.
+   - Verify it: `yarn docs:health`, then try `yarn docs:query "how does checkout work"`.
 
 For full details, architecture diagrams, and troubleshooting tips, see the [Workspace MCP Server Guide](./docs/guides/mcp-server.md).
+
+---
+
+## How the Workspace Gives an AI Agent Context
+
+The workspace is not just a place to keep code — it is structured so an AI agent
+can answer questions about it. Three layers, each usable without the ones below:
+
+| Layer | What it gives the agent | Needs |
+|---|---|---|
+| **Structured docs** — `docs/`, service READMEs | Written knowledge in predictable places, with headings that mean something | nothing |
+| **`docs_map`** (MCP tool) | A table of contents of `docs/`: every file → sections → line ranges | nothing |
+| **`docs_search`** (MCP tool, opt-in) | Hybrid semantic + keyword retrieval across the whole curated corpus | Qdrant + a local embedding model |
+
+Both tools return **pointers, not prose** — file path, heading path, line range,
+snippet. Neither answers the question; they locate the section, and the agent
+reads the real file. That keeps the retrieval layer debuggable and free of the
+"summarise-then-hallucinate" failure mode.
+
+The index stays current on its own: it rebuilds when a `git pull` brings changed
+documentation, at most once a day otherwise, and self-heals if the Qdrant volume
+is wiped. Rebuilds are zero-downtime, so they are safe to fire while someone is
+searching.
+
+**What goes in the index is a curation decision, not a glob.** Specs, task
+documents, agent skills, changelogs and templates are deliberately excluded:
+they describe *intent* or *procedure* rather than *reality*, and in a ranked list
+they outrank the docs that answer the question — a spec for an unbuilt feature
+reads exactly like documentation of a working one.
+
+```bash
+yarn docs:sources            # what is in the corpus, and why
+yarn docs:query "..."        # search it from the terminal
+yarn docs:health             # is the index actually healthy?
+yarn docs:eval               # does it still return good answers? (run monthly)
+yarn docs:ingest             # rebuild after editing docs locally
+```
+
+- **How it works and why:** [Hybrid RAG over the Team Documentation](./docs/architecture/docs-rag.md)
+- **What to keep out of the index:** [Corpus hygiene](./docs/architecture/docs-rag.md#the-corpus--declared-not-discovered)
+- **What keeps it current:** [Workspace Automation](./docs/guides/workspace-automation.md)
+- **Keeping it accurate as it grows:** [Evaluating Retrieval Quality](./docs/guides/docs-rag-evaluation.md)
+- **When to move it off laptops:** [Scaling the index](./docs/architecture/docs-rag.md#scaling-when-to-move-the-index-off-developer-machines)
+- **Running Qdrant your way:** [Container runtime options](./docs/guides/qdrant-runtimes.md)
+- **When it breaks:** [Docs Search Operations](./docs/guides/docs-rag-operations.md)
+- **Writing docs that retrieve well:** [Documentation Hub](./docs/README.md#writing-docs-that-retrieve-well)
 
 ---
 
@@ -141,3 +205,41 @@ The most important setting it enforces is:
 ```
 
 VS Code's Source Control panel continuously scans for Git repositories inside the workspace. With a large number of nested repos cloned by `yarn setup`, this background scanning becomes extremely resource-intensive — slowing down the editor and flooding the Source Control view with unrelated repo states. Disabling submodule detection stops this entirely without affecting any other Git functionality.
+
+### Enable the daily setup task (one-time, per machine)
+
+[`.vscode/tasks.json`](./.vscode/tasks.json) defines a `folderOpen` task that
+runs the [daily setup guard](./scripts/daily-setup-guard.mjs) — pulling every
+nested repo and refreshing the docs index once per day.
+
+Automatic tasks must be enabled in your **user** settings; a workspace cannot
+grant itself permission to run code on open, by design:
+
+```json
+"task.allowAutomaticTasks": "on"
+```
+
+Without it the task never runs, and the automation looks broken with no error
+anywhere. This is the most common reason someone reports "the daily setup never
+happens". Reload the window after changing it.
+
+The same file also registers manual tasks for rebuilding the docs index, running
+a health check, evaluating retrieval quality, checking Qdrant, and printing the
+corpus.
+
+> **⚠ Enabling automatic tasks means code runs when you open a folder.**
+> `.vscode/tasks.json` is version-controlled, so anyone who can land a commit can
+> change what executes on your machine — and with the setting on, opening a
+> cloned untrusted repository is enough. If you enable it, adopt the review habit
+> that goes with it: treat diffs to `.vscode/tasks.json` and `.githooks/` like
+> diffs to a deploy script, and audit periodically —
+>
+> ```bash
+> cat .vscode/tasks.json                 # what runs on folder open
+> git config core.hooksPath              # expect: .githooks
+> ls -la .git/hooks/                     # NOT tracked — local-only additions
+> git log --oneline -- .githooks .vscode/tasks.json | head
+> ```
+>
+> If you clone widely, leave the setting off and run `yarn daily-setup` by hand.
+> Full rationale: [Security — automation is code execution](./docs/guides/workspace-automation.md#security-automation-is-code-execution).

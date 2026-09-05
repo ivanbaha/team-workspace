@@ -1,21 +1,22 @@
 {
+  "$comment": "Replace 'your-org' with your real Git host/org. Entries still pointing at 'your-org' are treated as unconfigured placeholders: they are skipped with a notice instead of failing setup, so a fresh clone of this example workspace runs green out of the box.",
   "frontends": [
     {
       "name": "users-frontend",
       "description": "Microfrontend — Users domain UI (profile, settings, authentication)",
-      "git": "git@github.com:ivanbaha/tw-users-frontend.git",
+      "git": "git@github.com:your-org/tw-users-frontend.git",
       "path": "./frontend"
     },
     {
       "name": "products-frontend",
       "description": "Microfrontend — Products domain UI (catalogue, detail, search)",
-      "git": "git@github.com:ivanbaha/tw-products-frontend.git",
+      "git": "git@github.com:your-org/tw-products-frontend.git",
       "path": "./frontend"
     },
     {
       "name": "host-frontend",
       "description": "Host React application — composes all microfrontends at runtime",
-      "git": "git@github.com:ivanbaha/tw-host-frontend.git",
+      "git": "git@github.com:your-org/tw-host-frontend.git",
       "path": "./frontend"
     }
   ],
@@ -23,13 +24,13 @@
     {
       "name": "users-service",
       "description": "REST API — Users domain (accounts, authentication, profile)",
-      "git": "git@github.com:ivanbaha/tw-users-service.git",
+      "git": "git@github.com:your-org/tw-users-service.git",
       "path": "./backend"
     },
     {
       "name": "products-service",
       "description": "REST API — Products domain (catalogue, inventory, pricing)",
-      "git": "git@github.com:ivanbaha/tw-products-service.git",
+      "git": "git@github.com:your-org/tw-products-service.git",
       "path": "./backend"
     }
   ],
@@ -37,25 +38,25 @@
     {
       "name": "tw-common-frontend",
       "description": "Shared React hooks, context providers, and UI primitives used across all microfrontends",
-      "git": "git@github.com:ivanbaha/tw-common-frontend.git",
+      "git": "git@github.com:your-org/tw-common-frontend.git",
       "path": "./libs"
     },
     {
       "name": "tw-api-client",
       "description": "Typed HTTP client wrappers for all internal REST APIs, shared by frontends",
-      "git": "git@github.com:ivanbaha/tw-api-client.git",
+      "git": "git@github.com:your-org/tw-api-client.git",
       "path": "./libs"
     },
     {
       "name": "tw-common-backend",
       "description": "Shared Express middleware, JWT utilities, and error-handling helpers used across all backend services",
-      "git": "git@github.com:ivanbaha/tw-common-backend.git",
+      "git": "git@github.com:your-org/tw-common-backend.git",
       "path": "./libs"
     },
     {
       "name": "tw-config",
       "description": "Centralised environment variable loader and schema validation for all services",
-      "git": "git@github.com:ivanbaha/tw-config.git",
+      "git": "git@github.com:your-org/tw-config.git",
       "path": "./libs"
     }
   ]

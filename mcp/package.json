@@ -13,13 +13,16 @@
     "start:dev": "node node_modules/@modelcontextprotocol/inspector/cli/build/cli.js node src/index.js",
     "docs:ingest": "node scripts/ingest-docs.mjs",
     "docs:sources": "node scripts/list-sources.mjs",
+    "docs:query": "node scripts/search-docs.mjs",
+    "docs:health": "node scripts/docs-health.mjs",
+    "docs:eval": "node scripts/docs-eval.mjs",
     "docs:download-model": "node scripts/download-model.mjs",
-    "qdrant:up": "docker run -d -p 6333:6333 -p 6334:6334 -v \"$(pwd)/.qdrant-storage:/qdrant/storage\" --name workspace-docs-qdrant qdrant/qdrant:v1.12.4",
-    "qdrant:up:wslc": "wslc run -d -p 6333:6333 -p 6334:6334 -v ./.qdrant-storage:/qdrant/storage --name workspace-docs-qdrant qdrant/qdrant:v1.12.4",
-    "qdrant:down": "docker stop workspace-docs-qdrant && docker rm -f workspace-docs-qdrant",
-    "qdrant:down:wslc": "wslc container stop workspace-docs-qdrant",
-    "qdrant:logs": "docker logs workspace-docs-qdrant",
-    "qdrant:logs:wslc": "wslc container logs workspace-docs-qdrant"
+    "docs:reset": "node scripts/docs-reset.mjs",
+    "qdrant": "node scripts/qdrant.mjs",
+    "qdrant:up": "node scripts/qdrant.mjs up",
+    "qdrant:down": "node scripts/qdrant.mjs stop",
+    "qdrant:logs": "node scripts/qdrant.mjs logs",
+    "qdrant:status": "node scripts/qdrant.mjs status"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

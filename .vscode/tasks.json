@@ -1,0 +1,74 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// SECURITY: tasks in this file execute code on the machine of anyone who opens
+// this folder with "task.allowAutomaticTasks": "on" in their USER settings.
+//
+// This file is version-controlled, so anyone who can land a commit can change
+// what runs. Review every diff to it the way you would review a deploy script
+// (a CODEOWNERS entry is worth adding), and keep every task a one-line call
+// into a tracked script under scripts/ so the real logic goes through normal
+// code review instead of hiding in a JSON string.
+//
+// Audit what is installed:  cat .vscode/tasks.json && ls -la .git/hooks/
+// Full rationale: docs/guides/workspace-automation.md#security-automation-is-code-execution
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Runs on every folder open. The guard itself gates the expensive work to
+      // once per calendar day (.git/last-daily-setup), so this staying cheap is
+      // the guard's job, not the task's.
+      //
+      // Automatic tasks require "task.allowAutomaticTasks": "on" in USER
+      // settings — it cannot be enabled from workspace settings, by design.
+      // Without it this task never runs and the automation looks broken with no
+      // error anywhere. See docs/guides/workspace-automation.md.
+      "label": "Daily workspace setup",
+      "type": "shell",
+      "command": "node scripts/daily-setup-guard.mjs",
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": {
+        "reveal": "silent",
+        "revealProblems": "onProblem",
+        "panel": "dedicated",
+        "close": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Evaluate retrieval quality",
+      "type": "shell",
+      "command": "yarn docs:eval",
+      "options": { "cwd": "${workspaceFolder}/mcp" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Qdrant status",
+      "type": "shell",
+      "command": "yarn qdrant status",
+      "options": { "cwd": "${workspaceFolder}/mcp" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Rebuild docs search index",
+      "type": "shell",
+      "command": "yarn docs:ingest",
+      "options": { "cwd": "${workspaceFolder}/mcp" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docs index health check",
+      "type": "shell",
+      "command": "yarn docs:health",
+      "options": { "cwd": "${workspaceFolder}/mcp" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Show docs search corpus",
+      "type": "shell",
+      "command": "yarn docs:sources",
+      "options": { "cwd": "${workspaceFolder}/mcp" },
+      "problemMatcher": []
+    }
+  ]
+}

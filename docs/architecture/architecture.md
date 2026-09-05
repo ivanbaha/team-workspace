@@ -44,4 +44,4 @@ User authentication is handled exclusively by `users-service`. On login, a JWT i
 
 ## Deployment
 
-All services are containerised (Docker) and deployed to Kubernetes. Infrastructure and deployment configuration lives in [infra](../infra/README.md).
+All services are containerised (Docker) and deployed to Kubernetes. Infrastructure and deployment configuration lives in [infra](../../infra/README.md).

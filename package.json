@@ -2,7 +2,7 @@
   "name": "team-workspace",
   "version": "1.0.0",
   "private": true,
-  "description": "Monorepo workspace for the development team — frontend microfrontends, backend services, infrastructure, and documentation.",
+  "description": "Monorepo workspace for the development team \u2014 frontend microfrontends, backend services, infrastructure, and documentation.",
   "workspaces": [
     "frontend/*",
     "backend/*",
@@ -11,6 +11,14 @@
   "scripts": {
     "setup": "node scripts/setup-workspace.mjs",
     "update": "node scripts/update-workspace.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "daily-setup": "node scripts/daily-setup-guard.mjs",
+    "docs:ingest": "yarn --cwd mcp docs:ingest",
+    "docs:health": "yarn --cwd mcp docs:health",
+    "docs:eval": "yarn --cwd mcp docs:eval",
+    "docs:query": "yarn --cwd mcp docs:query",
+    "docs:sources": "yarn --cwd mcp docs:sources",
+    "qdrant": "yarn --cwd mcp qdrant",
     "dev:host": "yarn workspace host-frontend dev",
     "dev:users-fe": "yarn workspace users-frontend dev",
     "dev:products-fe": "yarn workspace products-frontend dev",

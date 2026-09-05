@@ -1,0 +1,154 @@
+{
+  "$comment": "Golden set for `yarn docs:eval`. Each case is a question a teammate would actually ask, plus the file that should answer it. Keep it small and real: 15-30 cases you genuinely care about beats 200 synthetic ones. Add a case whenever someone reports a bad search result — that is how the set stays honest about YOUR corpus rather than about retrieval in the abstract.",
+  "$baseline": {
+    "measuredOn": "2026-09-05",
+    "corpus": {
+      "files": 32,
+      "chunks": 310
+    },
+    "recallAt1": 0.6,
+    "recallAt3": 0.95,
+    "recallAt5": 1.0,
+    "mrr": 0.75,
+    "avgDistinctFilesTop5": 3.25,
+    "avgLatencyMs": 18,
+    "note": "Starting point for trend tracking. Compare the TREND across runs, not absolute values. With 20 cases the run-to-run noise is real: one query moving rank shifts recall@1 by 5 points and MRR by ~0.02, so look for a consistent direction over 3+ runs before concluding anything."
+  },
+  "thresholds": {
+    "recallAt1": 0.55,
+    "recallAt5": 0.85,
+    "mrr": 0.65
+  },
+  "cases": [
+    {
+      "query": "what happens when a price changes during checkout",
+      "expect": [
+        "docs/business/checkout-flow.md"
+      ],
+      "note": "Semantic: the answering section shares no words with the question."
+    },
+    {
+      "query": "which service owns each stage of checkout",
+      "expect": [
+        "docs/business/checkout-flow.md"
+      ]
+    },
+    {
+      "query": "why do we send an idempotency key when creating an order",
+      "expect": [
+        "docs/business/checkout-flow.md",
+        "docs/architecture/api-contracts.md"
+      ]
+    },
+    {
+      "query": "why is the corpus curated instead of indexing every markdown file",
+      "expect": [
+        "docs/architecture/docs-rag.md",
+        "mcp/README.md"
+      ]
+    },
+    {
+      "query": "why hybrid search instead of embeddings alone",
+      "expect": [
+        "docs/architecture/docs-rag.md"
+      ]
+    },
+    {
+      "query": "why are tables and code blocks never split into separate chunks",
+      "expect": [
+        "docs/architecture/docs-rag.md"
+      ]
+    },
+    {
+      "query": "how does re-indexing avoid downtime",
+      "expect": [
+        "docs/architecture/docs-rag.md"
+      ]
+    },
+    {
+      "query": "what stops two ingests running at the same time",
+      "expect": [
+        "docs/guides/workspace-automation.md"
+      ]
+    },
+    {
+      "query": "WS_SETUP_ACTIVE",
+      "expect": [
+        "docs/guides/workspace-automation.md"
+      ],
+      "note": "Lexical: an identifier dense vectors blur into its neighbours."
+    },
+    {
+      "query": "post-rewrite hook rebase pull",
+      "expect": [
+        "docs/guides/workspace-automation.md",
+        "scripts/README.md"
+      ]
+    },
+    {
+      "query": "the daily setup task never runs",
+      "expect": [
+        "docs/guides/workspace-automation.md",
+        "docs/guides/docs-rag-operations.md"
+      ]
+    },
+    {
+      "query": "docs_search returns zero results for everything",
+      "expect": [
+        "docs/guides/docs-rag-operations.md"
+      ]
+    },
+    {
+      "query": "how do I rebuild the index from scratch after wiping the volume",
+      "expect": [
+        "docs/guides/docs-rag-operations.md"
+      ]
+    },
+    {
+      "query": "how do I run Qdrant without Docker Desktop",
+      "expect": [
+        "docs/guides/docs-rag-operations.md",
+        "mcp/README.md"
+      ]
+    },
+    {
+      "query": "DOCS_RAG_CHUNK_MAX",
+      "expect": [
+        "docs/architecture/docs-rag.md",
+        "mcp/README.md"
+      ]
+    },
+    {
+      "query": "how do I search Grafana logs from the command line",
+      "expect": [
+        ".ai/connectors/grafana/README.md"
+      ]
+    },
+    {
+      "query": "why do connectors print JSON to stdout only",
+      "expect": [
+        ".ai/connectors/grafana/README.md",
+        ".ai/README.md"
+      ]
+    },
+    {
+      "query": "difference between MCP tools and connectors",
+      "expect": [
+        ".ai/README.md"
+      ]
+    },
+    {
+      "query": "how do I add a new repo to the workspace",
+      "expect": [
+        "scripts/README.md",
+        "README.md"
+      ]
+    },
+    {
+      "query": "what are the shared API error conventions",
+      "expect": [
+        "docs/architecture/api-contracts.md"
+      ]
+    }
+  ]
+}

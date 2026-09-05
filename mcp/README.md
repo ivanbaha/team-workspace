@@ -126,21 +126,65 @@ To enable it:
 You normally don't need these — they're for forcing an action or debugging:
 
 ```bash
-yarn qdrant:up            # start Qdrant via Docker (uses wslc if using yarn qdrant:up:wslc)
-yarn qdrant:down          # stop and delete the container (yarn qdrant:down:wslc for wslc)
+# Diagnose
+yarn docs:health          # is the index healthy? checks BOTH halves + orphans
+yarn docs:eval            # does it still return GOOD answers? (run monthly)
+yarn docs:query "..."     # run a search from the terminal (--explain shows each half)
 yarn docs:sources         # print the full list of files that get indexed
-yarn docs:download-model  # pre-download the embedding model
-yarn docs:ingest          # rebuild the index now (also resets the daily timer)
+
+# Build
+yarn docs:ingest          # rebuild now (blue-green — safe while the tool is in use)
+yarn docs:download-model  # pre-warm the embedding model cache
+yarn docs:reset --yes     # delete the index + volume and rebuild from scratch
+
+# Container — engine-agnostic, reads QDRANT_ENGINE from .env
+yarn qdrant up            # create + start
+yarn qdrant start|stop|rm|logs
+yarn qdrant status        # engine, container state, endpoint health
 ```
+
+Supported engines: `docker`, `podman`, `nerdctl`, `wslc` (Windows), `container`
+(Apple), and `external` for an instance managed elsewhere. See
+[Running Qdrant](../docs/guides/qdrant-runtimes.md).
+
+When a search returns nothing useful, `yarn docs:health` and
+`yarn docs:query --explain` answer two different questions — whether the index
+is broken, and whether retrieval simply ranked the wrong thing. See
+[Docs Search Operations](../docs/guides/docs-rag-operations.md).
 
 ### What gets indexed
 
-The corpus is defined in `src/docs/sources.js`. Currently indexed:
+The corpus is **declared, not discovered** — defined in `src/docs/sources.js`
+as an explicit list rather than "every `.md` in the workspace", because a
+workspace of cloned repos contains a lot of markdown that is not team knowledge.
+Currently indexed:
 
-- **`docs/`** — all team docs (architecture, API contracts, onboarding, etc.)
-- **`libs/`** — top-level library READMEs, plus hand-picked `tw-common-backend` packages.
-- **`configs/`** — configuration READMEs.
-- Individual files: workspace `README.md`, `mcp/README.md`, and `infra/git-ops/README.md`.
+- **`docs/`** — all team docs (architecture, business flows, guides), except
+  `docs/SPECs/` (`exclude: ['SPECs']`).
+- **`.ai/`** — agent **connector** docs (`exclude: ['skills']`).
+- **`frontend/`, `backend/`, `libs/`** — service READMEs at `depth: 1`, so a
+  newly cloned service is picked up with no edit to `sources.js`.
+- **`infra/`, `configs/`, `scripts/`** — tooling READMEs.
+- Individual files: workspace `README.md` and `mcp/README.md`.
+
+Deliberately **excluded**, each for a reason worth understanding before you copy
+this setup elsewhere:
+
+| Excluded | Why |
+|---|---|
+| Feature specs and task documents | Describe *intent*, not reality. Retrieval cannot tell a plan from a description, so a spec for an unbuilt feature reads like documentation of a working one. |
+| Agent skills (`.ai/skills/` and every mirror) | Instructions *to* an agent, not knowledge *about* the system — and each agent already receives them through its own wrapper. |
+| `CHANGELOG.md`, `_template/` | Rewritten by CI on every pipeline; placeholder prose that matches structural queries. |
+
+Always inspect the resolved list before rebuilding — it is instant, and it is
+the only way to see what a `depth` or `exclude` rule actually did:
+
+```bash
+yarn docs:sources
+```
+
+The reasoning behind each curation decision is in
+[the design doc](../docs/architecture/docs-rag.md#the-corpus--declared-not-discovered).
 
 ## Connecting to AI Agents
 
@@ -214,10 +258,26 @@ src/
     └── schemas.js    # docs tool schemas
 
 scripts/
-├── ingest-docs.mjs      # build the docs_search index
+├── ingest-docs.mjs      # build the docs_search index (collect -> chunk -> BM25 -> embed -> swap)
 ├── list-sources.mjs     # print the resolved list of indexed files
+├── search-docs.mjs      # run a docs_search query from the terminal (--explain)
+├── docs-health.mjs      # diagnose the index: alias, points, BM25, freshness, orphans
+├── docs-eval.mjs        # measure retrieval quality against docs-eval.json
+├── qdrant.mjs           # engine-agnostic container control (docker/podman/wslc/…)
+├── docs-reset.mjs       # delete the index + volume and rebuild from scratch
 └── download-model.mjs   # pre-warm/download the embedding model
 ```
+
+## Further reading
+
+| Document | Covers |
+|---|---|
+| [Hybrid RAG design](../docs/architecture/docs-rag.md) | Why hybrid, chunking rules, blue-green rebuilds, footprint, limitations |
+| [Docs Search Operations](../docs/guides/docs-rag-operations.md) | Health checks, symptom → cause, recovery procedures |
+| [Workspace Automation](../docs/guides/workspace-automation.md) | The five ingest triggers, git hooks, daily setup guard, automation security |
+| [Evaluating Retrieval Quality](../docs/guides/docs-rag-evaluation.md) | The periodic check that search still returns good answers |
+| [Running Qdrant](../docs/guides/qdrant-runtimes.md) | Docker, Podman, WSL, Apple containers, external |
+| [MCP Server Guide](../docs/guides/mcp-server.md) | Setup, transport, agent configuration |
 
 ## License
 

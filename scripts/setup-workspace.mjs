@@ -2,139 +2,111 @@
 /**
  * setup-workspace.mjs
  *
- * First-time workspace initialisation:
- *   1. Configures git to use the shared hooks in .githooks/ (installs the
- *      post-merge hook that auto-syncs nested repos after every `git pull`).
- *   2. Reads configs/workspace-repos.json and clones any repo that is not
- *      already present on disk. Existing repos are skipped.
+ * Workspace initialisation, and the once-a-day bulk sync behind the daily guard:
+ *   1. Install/repair the git hooks in .githooks/.
+ *   2. Clone every repo in configs/workspace-repos.json that is missing, and
+ *      (with --pull) pull the ones already on disk.
+ *   3. Rebuild the docs index ONCE at the end, if the flags say it is warranted.
  *
- * For pulling updates on repos that already exist, run `yarn update` instead.
+ * Step 3 is the reason this script owns the rebuild rather than leaving it to
+ * the git hooks: a bulk sync touches ~N repos, and N pull hooks would each
+ * schedule their own ingest. WS_SETUP_ACTIVE=1 is exported before any git call
+ * and inherited by every child, so those hooks stand down and exactly one
+ * rebuild runs here.
+ *
+ * Flags:
+ *   (none)               always rebuild the docs index at the end
+ *   --pull               also pull repos that already exist (not just clone missing)
+ *   --skip-docs          never rebuild
+ *   --docs-if-changed    rebuild only if a pulled/cloned repo moved docs markdown
+ *   --external-changed   seed "docs changed = true" (the caller already saw a change)
+ *   --docs-dry-run       print the rebuild decision without paying for it
  *
  * Usage:
- *   node scripts/setup-workspace.mjs
  *   yarn setup
+ *   yarn setup --pull --docs-if-changed
+ *   yarn setup --docs-if-changed --docs-dry-run
  */
 
-import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { ROOT, syncRepos, printSummary } from './lib/repo-sync.mjs';
+import { decideIngest, runIngest } from './lib/docs-ingest.mjs';
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const ROOT = resolve(__dirname, '..');
-const CONFIG_PATH = join(ROOT, 'configs', 'workspace-repos.json');
+const args = new Set(process.argv.slice(2));
+const opts = {
+  pull: args.has('--pull'),
+  skipDocs: args.has('--skip-docs'),
+  ifChanged: args.has('--docs-if-changed'),
+  externalChanged: args.has('--external-changed'),
+  dryRun: args.has('--docs-dry-run'),
+};
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const log = (msg) => process.stdout.write(msg + '\n');
 
-function log(msg) {
-  process.stdout.write(msg + '\n');
-}
-
-function exec(cmd, opts = {}) {
-  try {
-    execSync(cmd, { stdio: 'inherit', ...opts });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function cloneRepo(git, targetDir) {
-  try {
-    execSync(`git clone ${git} ${targetDir}`, { stdio: 'inherit' });
-    return true;
-  } catch {
-    return false;
-  }
-}
+// Every git child below this point inherits the flag, so nested hooks know a
+// bulk sync owns the docs rebuild. Set before the first git call, not later.
+process.env.WS_SETUP_ACTIVE = '1';
 
 // ---------------------------------------------------------------------------
-// Step 1 — Install git hooks
+// Step 1 — git hooks
 // ---------------------------------------------------------------------------
 
 function installHooks() {
-  log('[1/2] Installing git hooks...');
-  const ok = exec('git config core.hooksPath .githooks', { cwd: ROOT });
-  if (ok) {
-    log('      git hooks path set to .githooks (post-merge hook is now active)');
-  } else {
-    log('      WARNING: Could not set git hooks path. Run manually:');
-    log('               git config core.hooksPath .githooks');
-  }
+  log('[1/3] Installing git hooks...');
+  const res = spawnSync(process.execPath, [join(ROOT, 'scripts', 'install-git-hooks.mjs')], {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
+  if (res.status !== 0) log('      WARNING: hook installation reported a problem; continuing.');
 }
 
 // ---------------------------------------------------------------------------
-// Step 2 — Clone missing repos
+// Step 2 — repos
 // ---------------------------------------------------------------------------
 
-function cloneMissingRepos() {
-  log('\n[2/2] Cloning missing repos...');
-
-  if (!existsSync(CONFIG_PATH)) {
-    log(`ERROR: Config file not found at ${CONFIG_PATH}`);
-    process.exit(1);
-  }
-
-  const config = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
-  const categories = Object.entries(config);
-
-  if (categories.length === 0) {
-    log('No repos configured. Nothing to do.');
-    return;
-  }
-
-  let cloned = 0;
-  let skipped = 0;
-  let failed = 0;
-
-  for (const [category, repos] of categories) {
-    log(`\n[${category}]`);
-
-    for (const repo of repos) {
-      const { name, git, path: relPath } = repo;
-
-      if (!git || !relPath) {
-        log(`  SKIP  ${name ?? '(unnamed)'} — missing "git" or "path" field`);
-        skipped++;
-        continue;
-      }
-
-      const targetDir = resolve(ROOT, relPath, name);
-
-      if (existsSync(targetDir)) {
-        log(`  SKIP  ${name} — already exists`);
-        skipped++;
-        continue;
-      }
-
-      log(`  CLONE ${name}`);
-      log(`        ${git}`);
-      log(`        -> ${targetDir}`);
-
-      const ok = cloneRepo(git, targetDir);
-
-      if (ok) {
-        log(`  OK    ${name}`);
-        cloned++;
-      } else {
-        log(`  FAIL  ${name} — git clone returned a non-zero exit code`);
-        failed++;
-      }
-    }
-  }
-
-  log(`\nDone. Cloned: ${cloned}  Skipped: ${skipped}  Failed: ${failed}`);
-
-  if (failed > 0) {
-    process.exit(1);
-  }
+function syncStep() {
+  log(`\n[2/3] ${opts.pull ? 'Cloning missing and pulling existing repos' : 'Cloning missing repos'}...`);
+  const stats = syncRepos(opts.pull ? 'update' : 'setup');
+  printSummary(stats);
+  return stats;
 }
 
 // ---------------------------------------------------------------------------
-// Run
+// Step 3 — docs index
+// ---------------------------------------------------------------------------
+
+function docsStep(stats) {
+  log('\n[3/3] Docs index...');
+
+  // --external-changed lets the caller (the daily guard, which pulls the meta
+  // repo itself before invoking us) fold its own observation into the decision.
+  const docsChanged = stats.docsChanged || opts.externalChanged;
+  const decision = decideIngest({ ...opts, docsChanged });
+
+  log(`      Decision: ${decision.rebuild ? 'REBUILD' : 'SKIP'} — ${decision.reason}`);
+  if (opts.externalChanged) log('      (--external-changed seeded "docs changed = true")');
+
+  if (opts.dryRun) {
+    log('      --docs-dry-run: stopping here without rebuilding.');
+    return true;
+  }
+  if (!decision.rebuild) return true;
+
+  const { ok, message } = runIngest();
+  log(`      ${message}`);
+  // Non-blocking: a stale index is an inconvenience, not a failed setup.
+  return ok;
+}
+
 // ---------------------------------------------------------------------------
 
 installHooks();
-cloneMissingRepos();
+const stats = syncStep();
+const docsOk = docsStep(stats);
+
+if (stats.failed > 0) {
+  log(`\nSetup finished with ${stats.failed} repo failure(s).`);
+  process.exit(1);
+}
+if (!docsOk) log('\nSetup finished; the docs index rebuild did not complete (see above).');

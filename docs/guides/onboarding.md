@@ -68,7 +68,7 @@ Open `http://localhost:3000` in your browser.
 
 ## Key Links
 
-- [Architecture](./architecture.md)
-- [API Contracts](./api-contracts.md)
-- [Frontend overview](../frontend/README.md)
-- [Backend overview](../backend/README.md)
+- [Architecture](../architecture/architecture.md)
+- [API Contracts](../architecture/api-contracts.md)
+- [Frontend overview](../../frontend/README.md)
+- [Backend overview](../../backend/README.md)

@@ -36,4 +36,4 @@ git-ops/
 
 Changes to overlays trigger ArgoCD sync automatically. For production deployments, a manual sync approval is required in the ArgoCD UI.
 
-For the shared test environment configuration, see [test-env-global](../apps/test-env-global/README.md).
+For the shared test environment configuration, see the [infra overview](../README.md).

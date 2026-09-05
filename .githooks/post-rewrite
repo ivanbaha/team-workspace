@@ -1,0 +1,22 @@
+#!/bin/sh
+#
+# .githooks/post-rewrite
+#
+# Fires after history is rewritten — most importantly after `git pull --rebase`,
+# which replays commits so `post-merge` NEVER fires. This is the hook teams
+# forget: on a rebase-by-default team, a post-merge-only setup looks like the
+# automation is silently broken.
+#
+# git passes the reason as $1 ("rebase" or "amend") and the rewritten commit
+# pairs on stdin. Only a rebase can bring in someone else's commits, so `amend`
+# is ignored. stdin is drained either way so git never sees a broken pipe.
+
+cd "$(git rev-parse --show-toplevel)" || exit 0
+
+cat > /dev/null
+
+if [ "$1" = "rebase" ]; then
+  node .githooks/post-update.mjs post-rewrite
+fi
+
+exit 0

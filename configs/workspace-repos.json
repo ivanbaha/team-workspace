@@ -3,19 +3,19 @@
   "frontends": [
     {
       "name": "users-frontend",
-      "description": "Microfrontend — Users domain UI (profile, settings, authentication)",
+      "description": "Microfrontend \u2014 Users domain UI (profile, settings, authentication)",
       "git": "git@github.com:your-org/tw-users-frontend.git",
       "path": "./frontend"
     },
     {
       "name": "products-frontend",
-      "description": "Microfrontend — Products domain UI (catalogue, detail, search)",
+      "description": "Microfrontend \u2014 Products domain UI (catalogue, detail, search)",
       "git": "git@github.com:your-org/tw-products-frontend.git",
       "path": "./frontend"
     },
     {
       "name": "host-frontend",
-      "description": "Host React application — composes all microfrontends at runtime",
+      "description": "Host React application \u2014 composes all microfrontends at runtime",
       "git": "git@github.com:your-org/tw-host-frontend.git",
       "path": "./frontend"
     }
@@ -23,18 +23,36 @@
   "backends": [
     {
       "name": "users-service",
-      "description": "REST API — Users domain (accounts, authentication, profile)",
+      "description": "REST API \u2014 Users domain (accounts, authentication, profile)",
       "git": "git@github.com:your-org/tw-users-service.git",
       "path": "./backend"
     },
     {
       "name": "products-service",
-      "description": "REST API — Products domain (catalogue, inventory, pricing)",
+      "description": "REST API \u2014 Products domain (catalogue, inventory, pricing)",
       "git": "git@github.com:your-org/tw-products-service.git",
       "path": "./backend"
     }
   ],
   "libs": [
+    {
+      "name": "tw-tracing",
+      "description": "The Trace-Id contract \u2014 header name, id format, and the middleware that seeds it. Depended on by tw-logger and tw-http-connector",
+      "git": "git@github.com:your-org/tw-tracing.git",
+      "path": "./libs"
+    },
+    {
+      "name": "tw-logger",
+      "description": "NestJS JSON logger emitting the trace id on every record, plus the request/response log pair traces are reconstructed from",
+      "git": "git@github.com:your-org/tw-logger.git",
+      "path": "./libs"
+    },
+    {
+      "name": "tw-http-connector",
+      "description": "Outbound HTTP connector for NestJS services \u2014 propagates the trace id to the next service, with retries and masked verbose logging",
+      "git": "git@github.com:your-org/tw-http-connector.git",
+      "path": "./libs"
+    },
     {
       "name": "tw-common-frontend",
       "description": "Shared React hooks, context providers, and UI primitives used across all microfrontends",
@@ -49,7 +67,7 @@
     },
     {
       "name": "tw-common-backend",
-      "description": "Shared Express middleware, JWT utilities, and error-handling helpers used across all backend services",
+      "description": "Shared NestJS guards, JWT utilities, and error-handling helpers used across all backend services",
       "git": "git@github.com:your-org/tw-common-backend.git",
       "path": "./libs"
     },

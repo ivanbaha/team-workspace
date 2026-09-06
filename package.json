@@ -12,6 +12,8 @@
     "setup": "node scripts/setup-workspace.mjs",
     "update": "node scripts/update-workspace.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
+    "build:libs": "yarn workspace @tw/tracing build && yarn workspace @tw/logger build && yarn workspace @tw/http-connector build",
+    "test:libs": "yarn workspace @tw/tracing test && yarn workspace @tw/logger test && yarn workspace @tw/http-connector test",
     "daily-setup": "node scripts/daily-setup-guard.mjs",
     "docs:ingest": "yarn --cwd mcp docs:ingest",
     "docs:health": "yarn --cwd mcp docs:health",

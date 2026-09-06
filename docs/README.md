@@ -29,6 +29,8 @@ works and why it is shaped the way it is.
 | If you are… | Read |
 |---|---|
 | New to the workspace | [Onboarding](./guides/onboarding.md) |
+| Debugging something across services | [Tracing a Request](./guides/tracing-a-request.md) |
+| Wondering how tracing works, or why it is so small | [Distributed Tracing](./architecture/distributed-tracing.md) |
 | Setting up the AI tooling | [MCP Server Guide](./guides/mcp-server.md) |
 | Wondering how the agent finds anything | [Hybrid RAG design](./architecture/docs-rag.md) |
 | Writing or reading a feature spec | [SPECs](./SPECs/README.md) |

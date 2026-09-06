@@ -11,6 +11,7 @@ for how a connector is expected to behave.
 | `config.mjs` | Shared config loader — reads `GRAFANA_ENVS` from the root `.env`, falling back to `.ai/connectors/env.json` |
 | `get-available.mjs` | List configured environments; `--check` also tests connectivity |
 | `search-logs.mjs` | Search log lines in Loki by service, text, and time range |
+| `trace-id.mjs` | Trace one Trace-Id across every service and reconstruct the call chain |
 
 ## Usage
 
@@ -22,7 +23,30 @@ node .ai/connectors/grafana/get-available.mjs --check
 # Search logs
 node .ai/connectors/grafana/search-logs.mjs --env test --service users-service --search "timeout"
 node .ai/connectors/grafana/search-logs.mjs --env prod --search "500" --exclude "debug|trace" --limit 50
+
+# Trace one request across every service that touched it
+node .ai/connectors/grafana/trace-id.mjs --trace-id 01M0J6EYRY4TFEPR9PHJZ1QHPF --env test
+node .ai/connectors/grafana/trace-id.mjs --trace-id 01M0J6… --env test --report ./trace.md
 ```
+
+### `trace-id.mjs` options
+
+| Option | Description |
+| --- | --- |
+| `--trace-id <id>` | **Required.** The id, or any text containing one — a pasted log line, a URL, a stack trace |
+| `--env <key>` | Search one environment. **Pass it whenever you know it** — finding a trace is cheap, proving its absence is not |
+| `--start <iso>` / `--end <iso>` | Search window |
+| `--lookback <hours>` | Window size when `--start` is omitted (default 48, capped at 30 days — Loki rejects wider) |
+| `--limit <n>` | Max log lines (default 5000). Hitting the limit is reported, not hidden |
+| `--report <path>` | Also write the full Markdown report (Mermaid diagram, call tree, span table) |
+| `--json` | Print the compact summary instead of the report |
+
+The reconstruction logic is imported from `mcp/src/grafana/trace/` rather than duplicated, so this
+connector and the `grafana_trace_id` MCP tool can never disagree about what a trace means.
+
+**Read the output with the guards in mind** — `services.gaps` never means a service was skipped, and
+`ambiguous: true` means "do not trust the duration", not "the call did not happen". The full list is
+in [Tracing a Request](../../../docs/guides/tracing-a-request.md#reading-the-result-without-drawing-false-conclusions).
 
 ### `search-logs.mjs` options
 

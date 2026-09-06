@@ -1,0 +1,89 @@
+import { ulid } from 'ulidx';
+import { TRACE_ID_HEADER, TRACE_ID_SEGMENT_SEPARATOR } from './constants';
+
+/** The minimal shape this package needs from an inbound request. Framework-agnostic on purpose. */
+export interface RequestLike {
+  headers?: Record<string, unknown>;
+}
+
+/**
+ * Mints a new trace id.
+ *
+ * A ULID is used because it is lexicographically sortable by creation time, URL-safe, and
+ * recognisable in free text — which matters when the id arrives pasted into a bug report rather
+ * than typed into a search box.
+ *
+ * @returns A 26-character Crockford base32 ULID, e.g. `01M0J6EYRY4TFEPR9PHJZ1QHPF`.
+ */
+export function newTraceId(): string {
+  return ulid();
+}
+
+/**
+ * Builds a child trace id from a parent, for work that has no inbound request of its own.
+ *
+ * The result stays greppable as one family: a Loki filter on the parent id returns the parent and
+ * every derived leg, because `|=` is a substring match. That is the whole reason the suffix is
+ * appended rather than the id being replaced.
+ *
+ * @param parent - The id to extend. Any string; it does not have to be a ULID.
+ * @param segments - Segments to append, e.g. a page number, a chunk index, a leg name.
+ * @returns The extended id, e.g. `01M0J6EYRY4TFEPR9PHJZ1QHPF-page-3`.
+ * @example
+ * // A paginated sync run: one id per page, all provably part of one session.
+ * const traceId = deriveTraceId(sessionId, 'page', String(page));
+ */
+export function deriveTraceId(parent: string, ...segments: (string | number)[]): string {
+  return [parent, ...segments].join(TRACE_ID_SEGMENT_SEPARATOR);
+}
+
+/**
+ * Reads the trace id off an inbound request, case-insensitively.
+ *
+ * The fast path — an exact lowercase hit — covers everything Node's HTTP server produces. The slow
+ * path exists for requests assembled by hand in tests and for non-Node runtimes that preserve the
+ * sender's casing.
+ *
+ * @param req - Anything with a `headers` object.
+ * @returns The trace id, or `undefined` when the request carries none.
+ */
+export function getTraceId(req?: RequestLike): string | undefined {
+  const headers = req?.headers;
+  if (!headers) return undefined;
+
+  const direct = headers[TRACE_ID_HEADER];
+  if (typeof direct === 'string' && direct !== '') return direct;
+
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() !== TRACE_ID_HEADER) continue;
+    const value = headers[key];
+    if (typeof value === 'string' && value !== '') return value;
+    if (Array.isArray(value) && typeof value[0] === 'string' && value[0] !== '') return value[0];
+  }
+
+  return undefined;
+}
+
+/**
+ * Ensures the request carries a trace id, minting one only when it does not.
+ *
+ * **This mutates `req.headers` in place**, and that mutation is the entire mechanism the rest of the
+ * system relies on: every request-scoped provider downstream reads the same headers object, so
+ * seeding it once here is what makes the id available everywhere without being passed as an
+ * argument. Returning the id as well is a convenience, not the point.
+ *
+ * Inheriting an existing id rather than overwriting it is what makes the trace *distributed* — the
+ * first service to see a request creates the id, every service after it adopts one.
+ *
+ * @param req - The inbound request. Its `headers` object is created if missing.
+ * @returns The trace id now on the request — inherited if one was present, freshly minted otherwise.
+ */
+export function ensureTraceId(req: RequestLike): string {
+  const existing = getTraceId(req);
+  if (existing) return existing;
+
+  const traceId = newTraceId();
+  if (!req.headers) req.headers = {};
+  req.headers[TRACE_ID_HEADER] = traceId;
+  return traceId;
+}

@@ -32,8 +32,19 @@ export class GrafanaAPI {
     return this.request('/api/datasources');
   }
 
-  async queryLoki(datasourceUid, query, start, end, limit) {
+  /**
+   * Runs a Loki `query_range` through the Grafana datasource proxy.
+   *
+   * Going through the proxy rather than talking to Loki directly means the Grafana service-account
+   * token is the only credential involved — there is no second set of Loki credentials to
+   * distribute, rotate, or leak.
+   *
+   * @param {string} [direction] - 'forward' for chronological order (what trace assembly needs),
+   *   'backward' for newest-first (what a log search wants).
+   */
+  async queryLoki(datasourceUid, query, start, end, limit, direction) {
     const params = new URLSearchParams({ query, start, end, limit: String(limit) });
+    if (direction) params.set('direction', direction);
     return this.request(`/api/datasources/proxy/uid/${datasourceUid}/loki/api/v1/query_range?${params}`);
   }
 }

@@ -1,25 +1,27 @@
 import { GrafanaAPI } from './api.js';
+import { logqlString } from './trace/index.js';
 import { logger } from '../utils/logger.js';
 
-// Namespace used for global search varies by environment
+// Namespaces searched when no service is named. Varies by environment.
 const GLOBAL_NAMESPACE_REGEX = {
-  test: 'cx-core-test|tw',
-  default: 'connected-x|tw',
+  test: 'team-workspace-test',
+  default: 'team-workspace',
 };
 
 function buildLogQLQuery(env, service, search, exclude) {
   let query;
   if (service && search) {
-    query = `{container="${service}"} |= \`${search}\``;
+    // A plain `|=` line filter beats a regex match for a literal token such as a trace id.
+    query = `{container="${service}"} |= ${logqlString(search)}`;
   } else if (service) {
     query = `{container="${service}"}`;
   } else {
-    // global search
     const ns = GLOBAL_NAMESPACE_REGEX[env] ?? GLOBAL_NAMESPACE_REGEX.default;
-    query = `{namespace=~"${ns}"} |~ "${search}"`;
+    query = `{namespace=~"${ns}"} |= ${logqlString(search)}`;
   }
   if (exclude) {
-    query += ` !~ \`${exclude}\``;
+    // `exclude` is documented as a regex, so it stays a pattern — only the quoting is made safe.
+    query += ` !~ ${logqlString(exclude)}`;
   }
   return query;
 }
@@ -49,6 +51,11 @@ export class GrafanaTools {
 
   async initialize() {
     logger.info('Initialized Grafana tools');
+  }
+
+  /** Namespace selector used when searching across services, e.g. for a trace id. */
+  namespaceRegexFor(environment) {
+    return GLOBAL_NAMESPACE_REGEX[environment] ?? GLOBAL_NAMESPACE_REGEX.default;
   }
 
   createResponse(success, data = null, message = '') {

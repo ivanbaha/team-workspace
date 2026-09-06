@@ -9,10 +9,11 @@ agent that can read markdown and execute shell commands.
 ```txt
 .ai/
 ├── connectors/                  # Standalone Node.js scripts for external service access
-│   ├── grafana/                 # Grafana/Loki log search
+│   ├── grafana/                 # Grafana/Loki log search and request tracing
 │   │   ├── config.mjs           # Shared config loader (reads root .env)
 │   │   ├── get-available.mjs    # Lists configured environments / checks connectivity
-│   │   └── search-logs.mjs      # Queries Loki logs for a given environment
+│   │   ├── search-logs.mjs      # Queries Loki logs for a given environment
+│   │   └── trace-id.mjs         # Traces one Trace-Id across every service, rebuilding the call chain
 │   ├── gitlab/                  # GitLab API (MRs, projects, reviews, push)
 │   │   └── README.md
 │   ├── jira/                    # Jira API (issue get/create, attachments)
@@ -36,6 +37,7 @@ Run them directly:
 ```bash
 node .ai/connectors/grafana/get-available.mjs
 node .ai/connectors/grafana/search-logs.mjs --env uat --service my-service --search "error"
+node .ai/connectors/grafana/trace-id.mjs --trace-id 01M0J6EYRY4TFEPR9PHJZ1QHPF --env test
 ```
 
 All connectors output JSON to stdout and errors to stderr.
@@ -74,6 +76,11 @@ When adding a new capability, use the following rules to decide between MCP and 
 
 * **Definitely a Connector**: If the functionality is used *only once* or is highly specific to a single, isolated skill (e.g., a specific custom migration or script used by a single tutorial).
 * **Definitely in the MCP Server**: If the functionality is used *frequently* across many different tasks (e.g., fetching general Jira tickets, querying MongoDB databases, retrying GitLab pipeline jobs).
+`trace-id.mjs` is the instructive exception to that split: it exists in **both** forms. The
+reconstruction engine lives once in `mcp/src/grafana/trace/`, and the connector imports it rather
+than shelling out to the MCP server or duplicating the logic. An agent gets it as a tool; a human
+gets it as a CLI; neither can disagree with the other about what a trace means.
+
 * **Arguable Cases**: For other cases, decide on a case-by-case basis keeping in mind:
   * *Overloading the MCP*: Permanently consumes the agent's model context window because all active tool schemas are loaded into the LLM system prompt.
   * *Overloading Connectors*: Makes tool discovery and invocation more difficult. The agent has to list directories, parse README instructions, and construct shell commands, which can also consume context and introduce execution errors.

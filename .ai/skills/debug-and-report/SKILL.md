@@ -7,20 +7,73 @@ You are a debugging assistant. Your goal is to help the user investigate a repor
 Ask the user to describe the issue. You need at minimum:
 
 - What happened (error message, unexpected behavior)
-- Any identifiers: trace-id, timestamp, API path, user action
+- Any identifiers: **trace id**, timestamp, API path, user action
 - Environment (if known)
 
 If the user provides **no identifiers at all** (only a vague description like "something broke in prod"), ask one focused follow-up before proceeding:
 
-> "Can you share any error message, timestamp, or the name of the endpoint/feature that failed?"
+> "Can you share any error message, timestamp, the `x-trace-id` from the failing response, or the name of the endpoint/feature that failed?"
 
-If the user provides a trace-id, skip directly to log search using it as the `--search` value — it will give you the clearest picture immediately.
+**If a trace id is available in any form, go straight to Step 1a. Do not start with `grafana_search_logs`.**
 
-If no trace-id but an API path or service name is mentioned, identify the service from the path and proceed to log search.
+The id does not have to be clean. A pasted log line, a URL, or a stack trace containing one all work — the tooling extracts it. Every response from every service echoes `x-trace-id`, so a user who can reproduce the problem can always produce one.
+
+If there is no trace id but an API path or service name is mentioned, identify the service from the path and proceed to Step 2 (log search). Once you find **any** relevant log line, read its `traceId` field and return to Step 1a — one trace beats ten narrowing queries.
+
+## Step 1a: Trace the request (do this first whenever a trace id is known)
+
+Call `grafana_trace_id` with just the `trace_id`, adding `environment` whenever you know it:
+
+```txt
+grafana_trace_id  { "trace_id": "01M0J6EYRY4TFEPR9PHJZ1QHPF", "environment": "test" }
+```
+
+Or from a shell:
+
+```bash
+node .ai/connectors/grafana/trace-id.mjs --trace-id 01M0J6EYRY4TFEPR9PHJZ1QHPF --env test
+```
+
+It finds the environment itself when you do not name one, reconstructs the call chain, and returns
+spans, caller → callee edges, per-call status codes and durations, coverage gaps, and every error
+and warning logged under that id — replacing the manual narrowing loop in Step 2 entirely.
+
+**Always name the environment when you know it.** Finding a trace is cheap; proving its absence
+means scanning every environment over the whole window.
+
+Pass `output_file` for a large trace so the full report goes to a file instead of into context.
+
+### Interpretation guards — do not skip these
+
+The reconstruction is a heuristic. A flat trace id carries no span identity, so the output flags its
+own uncertainty and you must not read past those flags:
+
+- `services.gaps` — services that took part but emitted **no** request logs. A gap does **not** mean
+  the service was uninvolved; it usually means it has not adopted `@tw/logger`, is running below
+  `info` level, or is not ours. **Never conclude a service was skipped from its absence in `spans`.**
+- `ambiguous: true` / `paired: false` — another request was open on the same endpoint, so the
+  incoming/outgoing pairing is a guess. Read this as "do not trust the elapsed time", **not** as
+  "the call did not happen".
+- `unterminated: true` — a request never produced a response: a crash, a timeout, or a request still
+  in flight. This is frequently the finding, not noise.
+- `repeatedEdges` — the same call made more than once in one request. Could be cache misses or
+  duplicated work; the tool reports the count and refuses to guess. Worth investigating.
+- `found: false` with every probe `empty` — searched successfully, the id is genuinely not there in
+  that window. Retry with a wider `lookback_hours` before concluding anything.
+- `found: false` with any probe `unreachable` — an environment could not be queried, usually an
+  expired Grafana token. **This is not proof of absence.**
+- **Zero spans plus a 401/403 warning is a complete trace.** Guards run before interceptors in
+  NestJS, so a rejected request never reaches the request-logging interceptor. The rejection is
+  logged under the trace id by the exception filter; the absence of spans is expected, not a gap.
+
+Background: [Distributed Tracing](../../../docs/architecture/distributed-tracing.md) ·
+[Tracing a Request](../../../docs/guides/tracing-a-request.md)
 
 ### Resolve Exact Service Name
 
 **ALWAYS** look up the exact service/container name before querying Grafana — never guess it. Use `backend/README.md` which lists all services with their exact names. Match the user's description to the correct entry (e.g. "users" → `users-service`, not `user-service`).
+
+The container name, `DEPLOYMENT_NAME`, the `serviceName` in every log line, and the service's outbound `User-Agent` are all the same string by design, so the name in `backend/README.md` is the one that works everywhere.
 
 ### Check Deployment Config for Scheduled/Sync Services
 
@@ -82,10 +135,11 @@ Available options:
 
 Search approach:
 
-- If trace-id is available: use it as `--search` — this is the fastest path.
+- **If a trace id is available, you should be in Step 1a, not here.** `grafana_trace_id` does in one call what this section does in several.
 - If service name is known: set it as `--service`.
 - If only an error message or keyword is available: use it as `--search` and iterate through environments.
 - Narrow down time range using `--start`/`--end` if the user provides a timestamp or approximate time.
+- **The moment any returned line has a `traceId`, stop narrowing and go back to Step 1a with it.** One trace beats ten refined queries, and it will surface services you had not thought to search.
 
 ### Verify Connector Before Deep Investigation
 
@@ -176,7 +230,9 @@ Use the Jira connector (`.ai/connectors/jira/`) with the following conventions:
 The description must include:
 
 1. **Issue Description** — clear, informative explanation of what's happening and potential high-level fix direction (no deep implementation details).
-2. **Evidence** — include whichever of the following are available: trace-id, relevant log excerpts, error messages, timestamps, environment. All fields are optional — only include what exists.
+2. **Evidence** — include whichever of the following are available: **trace id**, relevant log excerpts, error messages, timestamps, environment. All fields are optional — only include what exists.
+
+   **Always include the trace id when you have one.** It is the single thing that lets whoever picks the ticket up next reconstruct the entire picture without asking anyone. Paste the reconstructed call chain (the Mermaid diagram from the report) when the issue spans more than one service.
 3. **Acceptance Criteria** — what "fixed" looks like.
 
 ### Team Assignment

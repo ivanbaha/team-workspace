@@ -35,6 +35,12 @@ Runs as a **stdio-only** MCP server. Configuration is loaded from the workspace 
 
 - **`grafana_get_available`** — Validate connectivity to configured Grafana environments
 - **`grafana_search_logs`** — Search logs in Grafana/Loki (by service, search string, or global)
+- **`grafana_trace_id`** — Trace one Trace-Id across every service that took part in a request and
+  return the reconstructed call chain: caller → callee edges, per-call status codes and durations,
+  coverage gaps, and every error logged under that id. Use it **first** whenever a trace id is
+  known — it replaces the manual `grafana_search_logs` narrowing loop with one call. See
+  [Distributed Tracing](../docs/architecture/distributed-tracing.md) and
+  [Tracing a Request](../docs/guides/tracing-a-request.md)
 
 ### MongoDB Integration Tools
 
@@ -236,9 +242,15 @@ src/
 │   ├── schemas.js    # Jira tool schemas
 │   └── tools.js      # Jira tool implementations
 ├── grafana/
-│   ├── api.js        # Grafana API client
+│   ├── api.js        # Grafana API client (Loki via the datasource proxy)
 │   ├── schemas.js    # Grafana tool schemas
-│   └── tools.js      # Grafana tool implementations
+│   ├── tools.js      # Grafana tool implementations
+│   ├── trace-tool.js # grafana_trace_id — cross-environment search + report writing
+│   └── trace/        # Trace reconstruction engine, shared with the .ai connector
+│       ├── parse.js  #   Loki lines → typed events (three log shapes tolerated)
+│       ├── spans.js  #   Pairs incoming/outgoing; builds edges, the call tree, coverage
+│       ├── render.js #   Mermaid sequence diagram + Markdown report
+│       └── index.js  #   Orchestration, id extraction, LogQL construction, summary
 ├── mongodb/
 │   ├── api.js        # MongoDB client
 │   ├── schemas.js    # MongoDB tool schemas

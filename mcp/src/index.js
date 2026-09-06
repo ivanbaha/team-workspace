@@ -12,6 +12,7 @@ import { gitlabToolSchemas } from "./gitlab/schemas.js";
 import { JiraTools } from "./jira/tools.js";
 import { jiraToolSchemas } from "./jira/schemas.js";
 import { GrafanaTools } from "./grafana/tools.js";
+import { TraceTool } from "./grafana/trace-tool.js";
 import { grafanaToolSchemas } from "./grafana/schemas.js";
 import { MongoDBTools } from "./mongodb/tools.js";
 import { mongodbToolSchemas } from "./mongodb/schemas.js";
@@ -41,6 +42,7 @@ class WorkspaceMCPServer {
     this.gitlabTools = null;
     this.jiraTools = null;
     this.grafanaTools = null;
+    this.traceTool = null;
     this.mongodbTools = null;
     this.docsTools = null;
     this.docsSearchTools = null;
@@ -157,6 +159,9 @@ class WorkspaceMCPServer {
           case "grafana_get_available":
             result = await this.grafanaTools.getAvailable();
             break;
+          case "grafana_trace_id":
+            result = await this.traceTool.trace(args);
+            break;
           case "grafana_search_logs":
             result = await this.grafanaTools.searchLogs(args.environment, {
               service: args.service,
@@ -242,6 +247,9 @@ class WorkspaceMCPServer {
       if (config.grafana) {
         this.grafanaTools = new GrafanaTools(config.grafana);
         await this.grafanaTools.initialize();
+        // Shares the GrafanaTools instance so credentials and the resolved datasource cache live in
+        // exactly one place.
+        this.traceTool = new TraceTool(this.grafanaTools);
       }
       if (config.mongodb) {
         this.mongodbTools = new MongoDBTools(config.mongodb);

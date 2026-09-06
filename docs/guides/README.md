@@ -9,6 +9,12 @@ runbooks.
 - [Workspace MCP Server](./mcp-server.md) — Run, configure, and connect the local
   MCP server to an AI assistant.
 
+## Debugging
+
+- [Tracing a Request](./tracing-a-request.md) — Following one request across
+  every service that touched it: getting a trace id, assembling the call chain,
+  and reading the result without drawing false conclusions from a heuristic.
+
 ## Operating the workspace
 
 - [Workspace Automation](./workspace-automation.md) — The git hooks, daily setup
@@ -26,6 +32,9 @@ runbooks.
 
 ## Background
 
+- [Distributed Tracing](../architecture/distributed-tracing.md) — Why tracing is
+  one header and one log field rather than a tracing stack, what that buys, and
+  what it gives up.
 - [Hybrid RAG design](../architecture/docs-rag.md) — Why the search layer is
   built the way it is, and — most importantly — what is deliberately kept
   **out** of the index.

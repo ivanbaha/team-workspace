@@ -18,6 +18,19 @@ Environment promotion follows the path: `dev -> test -> staging -> production`.
 
 ---
 
+## Observability
+
+Logs are the observability surface. Services write one JSON line per record to stdout; the
+node-level log shipper forwards it; Loki indexes the pod labels. Nothing is injected into
+application pods.
+
+Because every line carries a `traceId`, one query returns a whole request across every service —
+see [Distributed Tracing](../docs/architecture/distributed-tracing.md). The deployment-side
+requirement is small but not optional: see
+[required environment](./git-ops/README.md#required-environment-for-tracing).
+
+---
+
 ## Tooling
 
 - Kubernetes (k8s) for container orchestration

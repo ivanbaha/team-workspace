@@ -7,8 +7,8 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 ## Workspace Structure
 
 - [frontend](./frontend/README.md) — Frontend projects (microfrontends and host app)
-- [backend](./backend/README.md) — Backend services
-- [libs](./libs/README.md) — Internal shared libraries (UI primitives, API clients, common middleware)
+- [backend](./backend/README.md) — Backend services (NestJS)
+- [libs](./libs/README.md) — Internal shared libraries (tracing, logging, HTTP connector, UI primitives, API clients)
 - [infra](./infra/README.md) — Infrastructure configuration and GitOps
 - [docs](./docs/README.md) — Shared team documentation
 - [mcp](./mcp/README.md) — Custom Model Context Protocol (MCP) server for developer tools
@@ -29,8 +29,8 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 ### Backend
 
 - [backend/README.md](./backend/README.md) — Overview of all backend services
-  - [users-service](./backend/users-service/README.md) — REST API: Users domain
-  - [products-service](./backend/products-service/README.md) — REST API: Products domain
+  - [users-service](./backend/users-service/README.md) — NestJS REST API: Users domain
+  - [products-service](./backend/products-service/README.md) — NestJS REST API: Products domain
 
 ### Infrastructure
 
@@ -40,9 +40,12 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 ### Libraries
 
 - [libs/README.md](./libs/README.md) — Internal shared libraries
+  - [@tw/tracing](./libs/tw-tracing/README.md) — The Trace-Id contract: header, id format, the seed
+  - [@tw/logger](./libs/tw-logger/README.md) — JSON logger with the trace id on every line
+  - [@tw/http-connector](./libs/tw-http-connector/README.md) — Outbound client that propagates the trace id
   - tw-common-frontend — Shared React hooks, context providers, and UI primitives
   - tw-api-client — Typed HTTP client wrappers for all internal REST APIs
-  - tw-common-backend — Shared Express middleware, JWT utilities, and error helpers
+  - tw-common-backend — Shared NestJS guards, JWT utilities, and error helpers
   - tw-config — Centralised environment variable loader and schema validation
 
 ### Scripts and Config
@@ -61,6 +64,7 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 - [docs/README.md](./docs/README.md) — Documentation hub
   - [Guides](./docs/guides/README.md) — Local onboarding, tool configuration, and operational runbooks
     - [Onboarding](./docs/guides/onboarding.md) — Getting started guide for new team members
+    - [Tracing a Request](./docs/guides/tracing-a-request.md) — Following one request across every service that touched it
     - [Workspace MCP Server](./docs/guides/mcp-server.md) — In-depth connection and setup guide for the MCP server
     - [Workspace Automation](./docs/guides/workspace-automation.md) — Git hooks, daily setup guard, change-aware index rebuilds, automation security
     - [Docs Search Operations](./docs/guides/docs-rag-operations.md) — Health checks, symptom → cause, recovery
@@ -71,6 +75,7 @@ Central monorepo for the development team. All frontend microfrontends, backend 
   - [Architecture](./docs/architecture/README.md) — Technical designs, conventions, and patterns
     - [Architecture Overview](./docs/architecture/architecture.md) — System architecture overview
     - [API Contracts](./docs/architecture/api-contracts.md) — Shared API conventions
+    - [Distributed Tracing](./docs/architecture/distributed-tracing.md) — One header, one log field, no tracing stack
     - [Hybrid RAG over the Team Documentation](./docs/architecture/docs-rag.md) — How the agent searches these docs
   - [SPECs](./docs/SPECs/README.md) — Feature specifications. **Deliberately excluded from the search index** — see [why](./docs/architecture/docs-rag.md#case-study-why-specs-and-tasks-are-the-worst-offenders)
 
@@ -89,6 +94,9 @@ yarn setup
 # 2. Install all workspace dependencies
 yarn install
 
+# 3. Build the shared TypeScript libraries (services consume their dist/)
+yarn build:libs
+
 # Run the host frontend in development mode
 yarn dev:host
 
@@ -98,7 +106,7 @@ yarn dev:users-be
 # Pull updates in all nested repos (also runs automatically after git pull)
 yarn update
 
-# 3. (Optional) Run the local MCP server inside MCP Inspector (development)
+# 4. (Optional) Run the local MCP server inside MCP Inspector (development)
 cd mcp && yarn install && yarn start:dev
 ```
 
@@ -145,6 +153,47 @@ To set up the MCP server:
    - Verify it: `yarn docs:health`, then try `yarn docs:query "how does checkout work"`.
 
 For full details, architecture diagrams, and troubleshooting tips, see the [Workspace MCP Server Guide](./docs/guides/mcp-server.md).
+
+---
+
+## Following a Request Across Services
+
+Every request carries an `x-trace-id` header, and every service writes it as a `traceId` field on
+every log line it emits. Correlating a user action across all of them is one query:
+
+```logql
+{namespace=~"team-workspace"} |= "01M0J6EYRY4TFEPR9PHJZ1QHPF"
+```
+
+There is **no tracing SDK, no exporter, no collector, and nothing running next to the application
+process.** The id rides on the log collection that exists whether or not anything is correlated.
+Adoption per service is two module imports:
+
+```ts
+@Module({ imports: [TracingModule.forRoot(), LoggerModule.forRoot()] })
+export class AppModule {}
+```
+
+After that, no application code mentions a trace id. The logger and the outbound HTTP connector both
+inherit it through NestJS request-scoped DI, so a developer writes
+`this.logger.info('Order not found', 'OrdersService.get')` and the correlation happens by itself.
+
+What that trades away is real and stated plainly in the design doc: there are no per-call span ids,
+so caller → callee edges are *inferred* from the forwarded `User-Agent` rather than known exactly.
+In exchange the whole mechanism is a few hundred lines, every request is in the logs with no
+sampling, and if the log store is down you lose search rather than the request.
+
+| | |
+|---|---|
+| **How it works, and what it gives up** | [Distributed Tracing](./docs/architecture/distributed-tracing.md) |
+| **What to do when something breaks** | [Tracing a Request](./docs/guides/tracing-a-request.md) |
+| **The packages** | [@tw/tracing](./libs/tw-tracing/README.md) · [@tw/logger](./libs/tw-logger/README.md) · [@tw/http-connector](./libs/tw-http-connector/README.md) |
+| **Porting it to another stack** | [Applying this to other stacks](./docs/architecture/distributed-tracing.md#applying-this-to-other-stacks) |
+
+An agent connected to the MCP server gets the assembled chain in one call — `grafana_trace_id`
+returns caller → callee edges, per-call status codes and durations, coverage gaps, and every error
+logged under the id. Since the trace names services whose source is already checked out here, the
+step from "which service failed" to "which line failed" needs no context-gathering at all.
 
 ---
 

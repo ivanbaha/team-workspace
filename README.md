@@ -11,7 +11,9 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 - [backend](./backend/README.md) — Backend services (NestJS)
 - [libs](./libs/README.md) — Internal shared libraries (tracing, logging, HTTP connector, UI primitives, API clients)
 - [infra](./infra/README.md) — Infrastructure configuration and GitOps — the record of what is deployed where
-- [docs](./docs/README.md) — Shared team documentation
+- [docs](./docs/README.md) — Shared team documentation, including
+  [how work flows](./docs/sdlc/README.md), [specs](./docs/SPECs/README.md) and
+  [task one-pagers](./docs/tasks/README.md)
 - [.ai](./.ai/README.md) — Agent-neutral rules, skills and connectors
 - [mcp](./mcp/README.md) — Custom Model Context Protocol (MCP) server for developer tools
 - [scripts](./scripts/README.md) — Workspace automation scripts, including the agent hooks
@@ -72,7 +74,14 @@ yarn gitops:validate     # do all three overlays still build?
 ### Documentation
 
 - [docs/README.md](./docs/README.md) — Documentation hub
+  - [SDLC](./docs/sdlc/README.md) — How work flows from an idea to a verified change: four phases, their owners, and the hand-offs
+    - [Phase 1 · Origination](./docs/sdlc/01-origination.md) — Idea → analysed intent → the right tracker artifact
+    - [Phase 2 · Specification](./docs/sdlc/02-specification.md) — Staged, role-scoped spec authoring for big features only
+    - [Phase 3 · Development](./docs/sdlc/03-development.md) — Triage, implement, deliver, document
+    - [Phase 4 · Verification](./docs/sdlc/04-verification.md) — Coverage designed by QA from the acceptance criteria
+    - [SDD in Practice](./docs/sdlc/sdd-in-practice.md) — Why it is shaped this way, what it costs, and the honest limitations
   - [Guides](./docs/guides/README.md) — Local onboarding, tool configuration, and operational runbooks
+    - [SDLC Quickstart](./docs/guides/sdlc-quickstart.md) — You have a ticket; what do you actually do?
     - [Onboarding](./docs/guides/onboarding.md) — Getting started guide for new team members
     - [Tracing a Request](./docs/guides/tracing-a-request.md) — Following one request across every service that touched it
     - [Workspace MCP Server](./docs/guides/mcp-server.md) — In-depth connection and setup guide for the MCP server
@@ -91,7 +100,8 @@ yarn gitops:validate     # do all three overlays still build?
   - [Release runbooks](./docs/release/README.md) — One-off operations that have to happen inside a deployment window
   - [Spikes](./docs/spikes/README.md) — Investigations and audits: a question, a verdict, and when the verdict expires
   - [Knowledge sharing](./docs/knowledge-sharing/README.md) — Long-form write-ups from demos and deep dives
-  - [SPECs](./docs/SPECs/README.md) — Feature specifications. **Deliberately excluded from the search index** — see [why](./docs/architecture/docs-rag.md#case-study-why-specs-and-tasks-are-the-worst-offenders)
+  - [SPECs](./docs/SPECs/README.md) — Feature specifications, plus the [template](./docs/SPECs/_template/README.md). **Deliberately excluded from the search index** — see [why](./docs/architecture/docs-rag.md#case-study-why-specs-and-tasks-are-the-worst-offenders)
+  - [Task one-pagers](./docs/tasks/README.md) — Single-page plans for small work. Excluded from the index for the same reason
 
 ### MCP Server
 
@@ -267,6 +277,7 @@ once and delivered to every agent:
 | **Rules** | Standing conventions — branching, commits, environments, which commands to hand over | [`.ai/rules/`](./.ai/rules/README.md), indexed by [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 | **Skills** | Procedures for multi-step jobs, with explicit stopping points for approval | [`.ai/skills/`](./.ai/skills/README.md) |
 | **Hooks** | Guards that enforce the expensive-to-undo parts automatically | [`scripts/hooks/`](./scripts/hooks/README.md) |
+| **Process** | The lifecycle those three sit inside — who owns which phase, and what hands off to what | [`docs/sdlc/`](./docs/sdlc/README.md) |
 
 Every coding agent reads its instructions from a different conventional path —
 `CLAUDE.md`, `.github/copilot-instructions.md`, `.kiro/steering/`, `.agents/`, `.cursor/rules/`.
@@ -283,17 +294,21 @@ yarn skills:sync     # regenerate the skill wrappers from each SKILL.md's frontm
 yarn agents:check    # fail if anything has drifted
 ```
 
-**Skills carry the parts that must not vary.** `review-mr` drafts every finding and posts
-nothing without per-item approval. `release-mr` refuses to promote `dev` → `prod`, because a
+**Skills carry the parts that must not vary.** `author-spec` pauses at four review gates and
+refuses to draft ahead of an unapproved one — because a model that writes requirements,
+design and tasks in one pass has propagated its first mistake through all three.
+`implement-task` will not commit, push or open an MR without approval for that specific
+action. `review-mr` drafts every finding and posts nothing without per-item approval. `release-mr` refuses to promote `dev` → `prod`, because a
 version reaches production by having been in `test`. `fix-security-vulnerabilities` will not
 report a fix as done without a clean re-audit. Those are the properties that make an agent
 safe to point at someone else's merge request or at a production version pin — and they are
 exactly the ones that erode when the procedure is improvised each time.
 
 **Hooks catch what a rule cannot.** A rule that says "never push to main" is read once at the
-start of a session; a `PreToolUse` hook refuses the command every time. Four of them run here:
-credential and token guards, a protected-branch guard, a docs-index staleness notice, and a
-git-ops overlay build check. They are plain Node scripts reading JSON on stdin, wired for
+start of a session; a `PreToolUse` hook refuses the command every time. Five of them run here:
+credential and token guards, a protected-branch guard, a docs-index staleness notice, a
+git-ops overlay build check, and a docs delivery gate that turns "we should document this"
+into a step the agent has to answer for. They are plain Node scripts reading JSON on stdin, wired for
 Claude Code in `.claude/settings.json` and portable to anything else that can run a command on
 a tool event.
 

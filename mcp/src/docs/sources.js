@@ -50,15 +50,16 @@ const COMMON_BACKEND_PACKAGES = [
 export const SOURCES = [
   // ── Primary corpus ────────────────────────────────────────────────────────
   // Everything under docs/ — guides, business flows, architecture — EXCEPT
-  // docs/SPECs/, which holds specifications. See the note below on why intent
-  // and reality must not share a ranked list.
-  { base: 'docs', match: 'all', exclude: ['SPECs'] },
+  // docs/SPECs/ (specifications) and docs/tasks/ (task one-pagers). See the note
+  // below on why intent and reality must not share a ranked list.
+  { base: 'docs', match: 'all', exclude: ['SPECs', 'tasks'] },
 
   // ── Deliberately NOT indexed: specs, tasks, and agent skills ─────────────
   //
-  // Specs and task documents (docs/SPECs/) describe INTENT — what someone plans
-  // to build. The rest of docs/ describes REALITY — what exists. Both in one
-  // index is actively harmful, in a way that gets worse as the backlog grows:
+  // Specs (docs/SPECs/) and task one-pagers (docs/tasks/) describe INTENT — what
+  // someone plans to build. The rest of docs/ describes REALITY — what exists.
+  // Both in one index is actively harmful, in a way that gets worse as the
+  // backlog grows:
   //
   //   1. Duplication. A spec and the doc written after it cover the same
   //      feature in similar words, so a query matches both. The agent spends
@@ -73,15 +74,20 @@ export const SOURCES = [
   //      erases the point of a retrieval layer.
   //
   // Specs remain valuable to READ; an agent pointed at docs/SPECs/ finds them
-  // directly, knowing what they are. They just must not compete with reference
+  // directly, knowing what they are — and the skills that need one open it by
+  // path rather than searching for it. They just must not compete with reference
   // docs in a ranked list. If you do index them, index them into a SEPARATE
   // collection with a separate tool, so the caller chooses "what is planned?"
   // or "what is true?" — see docs/SPECs/README.md.
   //
-  // This is why the docs/ entry above carries exclude: ['SPECs'] rather than
-  // specs living outside docs/. Specifications are team knowledge and belong in
-  // docs/ next to everything else; the exclusion is a RETRIEVAL decision, not a
-  // statement about where the files should live.
+  // A delivered spec's durable output is the code, plus whatever it moved into
+  // these indexed docs. The spec itself stays as the decision record — the "why
+  // we rejected X" that reference documentation never carries well.
+  //
+  // This is why the docs/ entry above carries exclude: ['SPECs', 'tasks'] rather
+  // than specs living outside docs/. Specifications are team knowledge and belong
+  // in docs/ next to everything else; the exclusion is a RETRIEVAL decision, not
+  // a statement about where the files should live.
 
   // ── Agent tooling ─────────────────────────────────────────────────────────
   // Connector docs describe real, runnable tooling and its output contract —

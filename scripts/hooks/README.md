@@ -1,6 +1,7 @@
 # Agent Hooks
 
-Four small guards that catch the mistakes which are cheap to make and expensive to undo.
+Five small guards that catch the mistakes which are cheap to make and expensive to undo —
+four that prevent something, and one that stops a deliverable being quietly dropped.
 
 They are **agent-neutral Node scripts**: the tool event arrives as JSON on stdin, and the
 answer is an exit code. Nothing about them is specific to one assistant — they are wired for
@@ -56,6 +57,29 @@ It reports rather than fixes, which is the honest shape: the agent is not allowe
 failure it prevents is quiet — the agent edits a doc, searches for that very thing later,
 gets the pre-edit version, and proceeds confidently on stale content.
 
+### `docs-delivery-gate.mjs` — PostToolUse(Bash | *safe_push*) · reports
+
+After a push completes, says that the `docs/` deliverable of the task is still outstanding:
+read the `## Docs Impact` section of the task artifact, reconcile it against what actually
+shipped, and propose the `docs/` edits rather than pushing them.
+
+Documentation is the step that gets skipped universally, because nothing fails when it is
+missing — the MR is open, the pipeline is green, the ticket looks done. It also has the
+shortest useful window: docs written a week later are written from memory, by which point
+the non-obvious decision is exactly the one that has been forgotten. Team docs live in
+*this* repo while the code lives in a service repo, so they cannot ride in the service MR,
+and that separation is precisely why they get dropped.
+
+It stays silent when the push came from the workspace root, on the reading that the push
+*was* the docs delivery — otherwise the reminder would loop. Where the working directory is
+unknown it assumes a service push: a redundant reminder costs a sentence, a missed one
+costs the documentation.
+
+It reports and never blocks. A push that already happened cannot be un-pushed by refusing
+it, and a gate that blocks delivery over documentation is switched off inside a week.
+
+Process: [`docs/sdlc/03-development.md`](../../docs/sdlc/03-development.md#docs-delivery).
+
 ### `validate-overlay.mjs` — PostToolUse(Edit|Write) · reports
 
 After an edit under `infra/git-ops/`, builds the affected overlay — all three when the edit
@@ -78,6 +102,7 @@ Every hook reads stdin, so they are trivial to exercise by hand:
 ```bash
 echo '{"tool_input":{"command":"git push origin main"}}' | node scripts/hooks/guard-protected-branch.mjs
 echo "{\"tool_input\":{\"file_path\":\"$PWD/docs/README.md\"}}" | node scripts/hooks/docs-index-staleness.mjs
+echo '{"tool_name":"Bash","tool_input":{"command":"git push origin feat/TW-1-x"}}' | node scripts/hooks/docs-delivery-gate.mjs
 ```
 
 Exit `2` with a message on stderr means it fired.
@@ -92,7 +117,8 @@ Point the agent's own hook mechanism at the same scripts. The contract they need
 - Treat exit `2` as *blocked* for a pre-tool event and *message for the model* for a
   post-tool event.
 - Pass `tool_input.command` for shell events and `tool_input.file_path` for edit events —
-  the two fields these hooks read.
+  the two fields these hooks read. `docs-delivery-gate.mjs` also reads `tool_name` and,
+  where the agent supplies one, `tool_input.working_dir`.
 
 If an agent supplies a different payload shape, adapt
 [`lib/hook-io.mjs`](./lib/hook-io.mjs) rather than each hook: `commandOf()` and

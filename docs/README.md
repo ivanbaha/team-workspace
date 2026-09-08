@@ -16,6 +16,13 @@ works and why it is shaped the way it is.
 
 Ordered by how they age, which is also how they should be read.
 
+**Process — describes how the team works, and is kept current.**
+
+- [sdlc](./sdlc/README.md) — How work flows from an idea to a verified change:
+  four phases, their owners, and the hand-offs between them. The rules an agent
+  acts on live in [`.ai/rules/`](../.ai/rules/README.md); this is the lifecycle
+  they sit inside.
+
 **Reference — describes the system as it is today, and is kept current.**
 
 - [architecture](./architecture/README.md) — Technical designs, decisions,
@@ -42,9 +49,12 @@ Ordered by how they age, which is also how they should be read.
 
 **Intent — describes what is planned, and is kept out of the search index.**
 
-- [SPECs](./SPECs/README.md) — Feature specifications. The one directory here
-  **excluded from the search index**, and the README explains why that matters
-  more than it sounds.
+- [SPECs](./SPECs/README.md) — Feature specifications, for work big enough to
+  earn one. **Excluded from the search index**, and the README explains why that
+  matters more than it sounds.
+- [tasks](./tasks/README.md) — One-page plans for small work. Excluded for the
+  same reason: a plan and a description of something that exists are
+  indistinguishable to retrieval.
 
 A record and a reference doc answer differently, and the difference is worth
 keeping. "How does tracing work" is a reference question; "why is the orders
@@ -57,11 +67,15 @@ without anyone noticing.
 | If you are… | Read |
 |---|---|
 | New to the workspace | [Onboarding](./guides/onboarding.md) |
+| Starting a ticket right now | [SDLC Quickstart](./guides/sdlc-quickstart.md) |
+| Wondering who owns which phase, and what hands off to what | [SDLC](./sdlc/README.md) |
 | Debugging something across services | [Tracing a Request](./guides/tracing-a-request.md) |
 | Wondering how tracing works, or why it is so small | [Distributed Tracing](./architecture/distributed-tracing.md) |
 | Setting up the AI tooling | [MCP Server Guide](./guides/mcp-server.md) |
 | Wondering how the agent finds anything | [Hybrid RAG design](./architecture/docs-rag.md) |
 | Writing or reading a feature spec | [SPECs](./SPECs/README.md) |
+| Planning small work | [Task one-pagers](./tasks/README.md) |
+| Deciding how much process a piece of work earns | [Work Triage](../.ai/rules/work-triage.md) |
 | Fixing a broken docs index | [Docs Search Operations](./guides/docs-rag-operations.md) |
 | Wondering what rebuilds the index | [Workspace Automation](./guides/workspace-automation.md) |
 | Checking search still returns good answers | [Evaluating Retrieval Quality](./guides/docs-rag-evaluation.md) |
@@ -93,12 +107,12 @@ be found:
 
 **And what not to write here.** These directories describe *reality* — what the
 system does today, or what was true on a stated date. Plans and proposals
-describe *intent*, and they live in [SPECs](./SPECs/README.md), which is the one
-part of `docs/` deliberately kept out of the index. Mixing the two is the fastest
-way to make search untrustworthy: retrieval cannot tell a plan from a
-description, so a proposal filed here will be answered as fact. When a spec
-ships, move what is still true into these docs and leave the spec behind as the
-decision record.
+describe *intent*, and they live in [SPECs](./SPECs/README.md) and
+[tasks](./tasks/README.md) — the two parts of `docs/` deliberately kept out of
+the index. Mixing the two is the fastest way to make search untrustworthy:
+retrieval cannot tell a plan from a description, so a proposal filed here will be
+answered as fact. When a spec ships, move what is still true into these docs and
+leave the spec behind as the decision record.
 
 **Instructions to an agent are not documentation either.** The workspace rules
 ([`.ai/rules/`](../.ai/rules/README.md)) and skills

@@ -5,6 +5,9 @@ runbooks.
 
 ## Getting started
 
+- [SDLC Quickstart](./sdlc-quickstart.md) — You have a ticket; what do you actually do?
+  Triage it, spec it if it earns one, implement it, deliver the docs. The practical path
+  through the [four phases](../sdlc/README.md).
 - [Local Onboarding](./onboarding.md) — Step-by-step setup for a new developer.
 - [Workspace MCP Server](./mcp-server.md) — Run, configure, and connect the local
   MCP server to an AI assistant.
@@ -32,6 +35,8 @@ runbooks.
 
 ## Background
 
+- [SDD in Practice](../sdlc/sdd-in-practice.md) — Why the lifecycle is shaped this way,
+  what it costs, and where it strains. Read once; includes the honest limitations.
 - [Distributed Tracing](../architecture/distributed-tracing.md) — Why tracing is
   one header and one log field rather than a tracing stack, what that buys, and
   what it gives up.

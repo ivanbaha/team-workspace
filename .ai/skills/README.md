@@ -11,8 +11,15 @@ Each skill is written once here, as plain markdown. Every agent reads the same t
 
 ## The skills
 
+Four of them form the delivery lifecycle — triage, spec, implement, review — and are
+described end to end in [`docs/sdlc/`](../../docs/sdlc/README.md). The rest are jobs that
+stand on their own.
+
 | Skill | Use it when | Scripts |
 | --- | --- | --- |
+| [`plan-task`](./plan-task/SKILL.md) | Starting new work that arrived without a plan — it triages to spec / task / direct | — |
+| [`author-spec`](./author-spec/SKILL.md) | Writing or amending a feature spec under `docs/SPECs/` | — |
+| [`implement-task`](./implement-task/SKILL.md) | Executing one unit of work end to end, through to the MR and the docs deliverable | — |
 | [`review-mr`](./review-mr/SKILL.md) | Reviewing a merge request — first pass or a follow-up turn | — |
 | [`release-mr`](./release-mr/SKILL.md) | Promoting versions `dev` → `test` or `test` → `prod` in `infra/git-ops` | 4 |
 | [`fix-security-vulnerabilities`](./fix-security-vulnerabilities/SKILL.md) | A container scan or dependency audit found vulnerabilities | 4 |
@@ -62,6 +69,10 @@ The body is a procedure. What makes one worth writing rather than leaving to jud
   survives the variation.
 - **An explicit `Never` list at the end.** The failure modes that are cheap to describe and
   expensive to hit.
+- **The stopping points stated as gates, not as advice.** `author-spec` pauses after each
+  artifact and will not draft ahead; `implement-task` will not commit without approval for
+  that specific commit. A model that produces four coherent artifacts in one pass has also
+  propagated its first mistake through all four — the pause is what makes that reviewable.
 - **Scripts for anything mechanical, prose for anything that is a decision.** `release-mr`
   scripts the version copy and deliberately leaves the configuration changes to hand-editing,
   because each one is an individual judgement — a script there would invite applying them in

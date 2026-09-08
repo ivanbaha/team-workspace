@@ -43,6 +43,8 @@ function readRules() {
     'environments-and-ownership.md',
     'local-environment.md',
     'docs-index.md',
+    'work-triage.md',
+    'requirements-and-estimates.md',
   ];
   return order
     .filter((f) => existsSync(join(RULES_DIR, f)))
@@ -89,9 +91,15 @@ Two of them apply to almost every task and are worth reading first:
 - **\`docs_search\` before you \`grep\` or hand-roll a script.** There is very likely
   already a doc or a script for it.
 
-Multi-step jobs — reviewing an MR, cutting a release, fixing a vulnerability — have written
-procedures in [\`.ai/skills/\`](${link(target.path, '.ai/skills/README.md')}). Use the one that
-fits rather than improvising the steps.
+Multi-step jobs — planning a piece of work, writing a spec, implementing it, reviewing an MR,
+cutting a release, fixing a vulnerability — have written procedures in
+[\`.ai/skills/\`](${link(target.path, '.ai/skills/README.md')}). Use the one that fits rather
+than improvising the steps.
+
+**Starting new work goes through triage first.** How much process it earns — a spec, a
+one-page task, or nothing — is decided by the rubric in
+[\`work-triage.md\`](${link(target.path, '.ai/rules/work-triage.md')}), and the whole lifecycle
+is written up in [\`docs/sdlc/\`](${link(target.path, 'docs/sdlc/README.md')}).
 
 Orientation per area: [frontend](${link(target.path, 'frontend/README.md')}) ·
 [backend](${link(target.path, 'backend/README.md')}) ·

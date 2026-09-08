@@ -50,6 +50,11 @@ Do not write a throwaway script, invent a procedure, or start a broad `grep` swe
 
 | Looking for | Start at |
 | --- | --- |
+| How work flows — phases, owners, hand-offs | `docs/sdlc/README.md` |
+| What to do with a ticket you just picked up | `docs/guides/sdlc-quickstart.md` |
+| How much process a piece of work earns | [`work-triage.md`](./work-triage.md) |
+| A feature spec, or the spec template | `docs/SPECs/` — **not searchable, open it by path** |
+| A one-page plan for small work | `docs/tasks/` — **not searchable, open it by path** |
 | System architecture, patterns, conventions | `docs/architecture/README.md` |
 | How a request is followed across services | `docs/architecture/distributed-tracing.md`, `docs/guides/tracing-a-request.md` |
 | Business flows from the user's perspective | `docs/business/README.md` |
@@ -83,15 +88,18 @@ a reminder, not a substitute for saying so in your summary.
 
 ## What is deliberately *not* indexed
 
-`docs/SPECs/`, `.ai/skills/` and `.ai/rules/` are excluded on purpose.
+`docs/SPECs/`, `docs/tasks/`, `.ai/skills/` and `.ai/rules/` are excluded on purpose.
 
-Specifications describe **intent**; the rest of `docs/` describes **reality**. Retrieval has
-no notion of "planned" versus "shipped", so a spec for an unbuilt feature reads exactly like
-documentation of a working one — a wrong answer delivered confidently. Skills and rules are
+Specifications and task one-pagers describe **intent**; the rest of `docs/` describes
+**reality**. Retrieval has no notion of "planned" versus "shipped", so a spec for an unbuilt
+feature reads exactly like documentation of a working one — a wrong answer delivered
+confidently. Skills and rules are
 **instructions addressed to an agent**, already delivered by the agent runtime; indexing
 them adds a second, worse delivery path where procedural text competes with reference docs
 on the domain words it necessarily contains.
 
-They are all still valuable to **read** — read them directly, knowing what they are. The
+They are all still valuable to **read** — read them directly, knowing what they are. So a
+`docs_search` that comes back empty on a feature does **not** mean nobody has planned it:
+check `docs/SPECs/` and `docs/tasks/` by path before concluding the work is unstarted. The
 full reasoning is in the comment block in
 [`mcp/src/docs/sources.js`](../../mcp/src/docs/sources.js).

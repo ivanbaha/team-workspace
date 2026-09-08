@@ -9,3 +9,9 @@ build/
 # every run and frequently large; the skills that produce it say to delete it.
 .ai/skills/*/output/*
 !.ai/skills/*/output/.gitkeep
+
+example-delete-after/
+
+# Per-person operator identity, read on demand by the SDD skills.
+# Copy .ai/whoami.example.md to create it; it is never shared through this repo.
+.ai/whoami.md

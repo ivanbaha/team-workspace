@@ -13,6 +13,8 @@ file change.**
 - [Environments & Ownership](../.ai/rules/environments-and-ownership.md)
 - [Local Environment](../.ai/rules/local-environment.md)
 - [Finding Things — Search Before You Build](../.ai/rules/docs-index.md)
+- [Work Triage — Spec, Task, or Direct](../.ai/rules/work-triage.md)
+- [Requirements, Scope & Estimates](../.ai/rules/requirements-and-estimates.md)
 
 Two of them apply to almost every task and are worth reading first:
 
@@ -21,9 +23,15 @@ Two of them apply to almost every task and are worth reading first:
 - **`docs_search` before you `grep` or hand-roll a script.** There is very likely
   already a doc or a script for it.
 
-Multi-step jobs — reviewing an MR, cutting a release, fixing a vulnerability — have written
-procedures in [`.ai/skills/`](../.ai/skills/README.md). Use the one that
-fits rather than improvising the steps.
+Multi-step jobs — planning a piece of work, writing a spec, implementing it, reviewing an MR,
+cutting a release, fixing a vulnerability — have written procedures in
+[`.ai/skills/`](../.ai/skills/README.md). Use the one that fits rather
+than improvising the steps.
+
+**Starting new work goes through triage first.** How much process it earns — a spec, a
+one-page task, or nothing — is decided by the rubric in
+[`work-triage.md`](../.ai/rules/work-triage.md), and the whole lifecycle
+is written up in [`docs/sdlc/`](../docs/sdlc/README.md).
 
 Orientation per area: [frontend](../frontend/README.md) ·
 [backend](../backend/README.md) ·

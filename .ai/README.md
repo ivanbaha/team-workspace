@@ -15,6 +15,11 @@ Three kinds of thing live here, and the distinction matters:
 Rules always apply. A skill applies when its trigger matches. A connector is a tool either
 one reaches for.
 
+The delivery lifecycle those pieces add up to — who owns which phase, what each hands off,
+and where the specs and task one-pagers live — is documented in
+[`docs/sdlc/`](../docs/sdlc/README.md). That split is deliberate: `.ai/` holds instructions
+addressed to an agent, `docs/` holds knowledge addressed to the team.
+
 ## Structure
 
 ```txt
@@ -25,7 +30,9 @@ one reaches for.
 │   ├── code-style.md            # Comments, what the real gates are, diff hygiene
 │   ├── environments-and-ownership.md  # dev/test/prod, promotion, which repos are ours
 │   ├── local-environment.md     # Commands to hand to the operator; degraded-shell handling
-│   └── docs-index.md            # Search before you grep or build
+│   ├── docs-index.md            # Search before you grep or build
+│   ├── work-triage.md           # Spec / task / direct, and amend-vs-new-spec
+│   └── requirements-and-estimates.md  # EARS criteria, scope slicing, Fibonacci estimates
 ├── connectors/                  # Standalone Node.js scripts for external service access
 │   ├── grafana/                 # Grafana/Loki log search and request tracing
 │   │   ├── config.mjs           # Shared config loader (reads root .env)
@@ -38,8 +45,12 @@ one reaches for.
 │   │   └── README.md
 │   └── mongodb/                 # MongoDB queries (find, aggregate, count)
 │       └── README.md
+├── whoami.example.md            # Copy to whoami.md (git-ignored) to tell the agent who is operating
 └── skills/                      # Agent-neutral skill definitions
     ├── README.md                # The register, and how to write one
+    ├── plan-task/               # Triage new work into spec / task / direct
+    ├── author-spec/             # Author or amend a spec under docs/SPECs/
+    ├── implement-task/          # Execute one unit of work through to MR and docs
     ├── review-mr/               # Review someone's merge request, with per-finding approval
     ├── release-mr/              # Promote versions dev -> test -> prod in infra/git-ops
     │   └── scripts/             # read-versions, diff-envs, apply-versions, validate-overlays

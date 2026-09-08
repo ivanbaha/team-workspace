@@ -6,13 +6,15 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 
 ## Workspace Structure
 
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — **How work is done here.** Conventions, environments, skills, hooks. Start here.
 - [frontend](./frontend/README.md) — Frontend projects (microfrontends and host app)
 - [backend](./backend/README.md) — Backend services (NestJS)
 - [libs](./libs/README.md) — Internal shared libraries (tracing, logging, HTTP connector, UI primitives, API clients)
-- [infra](./infra/README.md) — Infrastructure configuration and GitOps
+- [infra](./infra/README.md) — Infrastructure configuration and GitOps — the record of what is deployed where
 - [docs](./docs/README.md) — Shared team documentation
+- [.ai](./.ai/README.md) — Agent-neutral rules, skills and connectors
 - [mcp](./mcp/README.md) — Custom Model Context Protocol (MCP) server for developer tools
-- [scripts](./scripts/README.md) — Workspace automation scripts
+- [scripts](./scripts/README.md) — Workspace automation scripts, including the agent hooks
 - [configs](./configs/) — Workspace-level configuration files
 
 ---
@@ -35,7 +37,12 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 ### Infrastructure
 
 - [infra/README.md](./infra/README.md) — Infrastructure overview
-  - [git-ops](./infra/git-ops/README.md) — GitOps deployment manifests
+  - [git-ops](./infra/git-ops/README.md) — GitOps deployment manifests: one base, three overlays (`dev`, `test`, `prod`), and the pinned version of every service
+
+```bash
+yarn gitops:versions     # what is pinned in each environment, drift marked
+yarn gitops:validate     # do all three overlays still build?
+```
 
 ### Libraries
 
@@ -55,8 +62,11 @@ Central monorepo for the development team. All frontend microfrontends, backend 
   - [update-workspace.mjs](./scripts/update-workspace.mjs) — Sync: pulls existing repos, clones any that are missing
   - [install-git-hooks.mjs](./scripts/install-git-hooks.mjs) — Point git at `.githooks/` and repair it
   - [daily-setup-guard.mjs](./scripts/daily-setup-guard.mjs) — Once-per-day flow, triggered on folder open
+  - [sync-agent-rules.mjs](./scripts/sync-agent-rules.mjs) — Generate the per-agent rule pointers (`yarn rules:sync`)
+  - [sync-skill-wrappers.mjs](./scripts/sync-skill-wrappers.mjs) — Generate the per-agent skill wrappers (`yarn skills:sync`)
+  - [hooks/](./scripts/hooks/README.md) — Agent guards: secrets, protected branches, docs-index staleness, overlay builds
 - [.githooks/](./.githooks/) — Tracked git hooks: `post-merge`, `post-rewrite`, and the shared `post-update.mjs` they delegate to
-- [configs/workspace-repos.json](./configs/workspace-repos.json) — List of repos to clone and sync (frontends, backends, libs)
+- [configs/workspace-repos.json](./configs/workspace-repos.json) — Repo registry: git remote, local path, and project ID for each repo
 - [.vscode/tasks.json](./.vscode/tasks.json) — `folderOpen` task that runs the daily guard, plus docs-index tasks
 
 ### Documentation
@@ -77,6 +87,10 @@ Central monorepo for the development team. All frontend microfrontends, backend 
     - [API Contracts](./docs/architecture/api-contracts.md) — Shared API conventions
     - [Distributed Tracing](./docs/architecture/distributed-tracing.md) — One header, one log field, no tracing stack
     - [Hybrid RAG over the Team Documentation](./docs/architecture/docs-rag.md) — How the agent searches these docs
+  - [Incidents](./docs/incidents/README.md) — Security and production incidents: what happened, whether it reached us, what to run
+  - [Release runbooks](./docs/release/README.md) — One-off operations that have to happen inside a deployment window
+  - [Spikes](./docs/spikes/README.md) — Investigations and audits: a question, a verdict, and when the verdict expires
+  - [Knowledge sharing](./docs/knowledge-sharing/README.md) — Long-form write-ups from demos and deep dives
   - [SPECs](./docs/SPECs/README.md) — Feature specifications. **Deliberately excluded from the search index** — see [why](./docs/architecture/docs-rag.md#case-study-why-specs-and-tasks-are-the-worst-offenders)
 
 ### MCP Server
@@ -184,7 +198,7 @@ In exchange the whole mechanism is a few hundred lines, every request is in the 
 sampling, and if the log store is down you lose search rather than the request.
 
 | | |
-|---|---|
+| --- | --- |
 | **How it works, and what it gives up** | [Distributed Tracing](./docs/architecture/distributed-tracing.md) |
 | **What to do when something breaks** | [Tracing a Request](./docs/guides/tracing-a-request.md) |
 | **The packages** | [@tw/tracing](./libs/tw-tracing/README.md) · [@tw/logger](./libs/tw-logger/README.md) · [@tw/http-connector](./libs/tw-http-connector/README.md) |
@@ -203,7 +217,7 @@ The workspace is not just a place to keep code — it is structured so an AI age
 can answer questions about it. Three layers, each usable without the ones below:
 
 | Layer | What it gives the agent | Needs |
-|---|---|---|
+| --- | --- | --- |
 | **Structured docs** — `docs/`, service READMEs | Written knowledge in predictable places, with headings that mean something | nothing |
 | **`docs_map`** (MCP tool) | A table of contents of `docs/`: every file → sections → line ranges | nothing |
 | **`docs_search`** (MCP tool, opt-in) | Hybrid semantic + keyword retrieval across the whole curated corpus | Qdrant + a local embedding model |
@@ -240,6 +254,53 @@ yarn docs:ingest             # rebuild after editing docs locally
 - **Running Qdrant your way:** [Container runtime options](./docs/guides/qdrant-runtimes.md)
 - **When it breaks:** [Docs Search Operations](./docs/guides/docs-rag-operations.md)
 - **Writing docs that retrieve well:** [Documentation Hub](./docs/README.md#writing-docs-that-retrieve-well)
+
+---
+
+## How the Workspace Tells an AI Agent What To Do
+
+Retrieval answers *what is true*. Three more layers answer *what to do*, and each is written
+once and delivered to every agent:
+
+| Layer | What it is | Where it lives |
+| --- | --- | --- |
+| **Rules** | Standing conventions — branching, commits, environments, which commands to hand over | [`.ai/rules/`](./.ai/rules/README.md), indexed by [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
+| **Skills** | Procedures for multi-step jobs, with explicit stopping points for approval | [`.ai/skills/`](./.ai/skills/README.md) |
+| **Hooks** | Guards that enforce the expensive-to-undo parts automatically | [`scripts/hooks/`](./scripts/hooks/README.md) |
+
+Every coding agent reads its instructions from a different conventional path —
+`CLAUDE.md`, `.github/copilot-instructions.md`, `.kiro/steering/`, `.agents/`, `.cursor/rules/`.
+Maintaining a copy per agent by hand is how they drift, and the drift is invisible: before this
+was generated, the same skill was named `Debug & Report` in one wrapper and `debug-and-report`
+in another with a different description, so it **triggered differently depending on which agent
+you asked**.
+
+So the per-agent files are generated from the canonical ones and verified in CI:
+
+```bash
+yarn rules:sync      # regenerate the six rule pointers from .ai/rules/ + CONTRIBUTING.md
+yarn skills:sync     # regenerate the skill wrappers from each SKILL.md's frontmatter
+yarn agents:check    # fail if anything has drifted
+```
+
+**Skills carry the parts that must not vary.** `review-mr` drafts every finding and posts
+nothing without per-item approval. `release-mr` refuses to promote `dev` → `prod`, because a
+version reaches production by having been in `test`. `fix-security-vulnerabilities` will not
+report a fix as done without a clean re-audit. Those are the properties that make an agent
+safe to point at someone else's merge request or at a production version pin — and they are
+exactly the ones that erode when the procedure is improvised each time.
+
+**Hooks catch what a rule cannot.** A rule that says "never push to main" is read once at the
+start of a session; a `PreToolUse` hook refuses the command every time. Four of them run here:
+credential and token guards, a protected-branch guard, a docs-index staleness notice, and a
+git-ops overlay build check. They are plain Node scripts reading JSON on stdin, wired for
+Claude Code in `.claude/settings.json` and portable to anything else that can run a command on
+a tool event.
+
+> **⚠ Hooks are code that runs on tool calls, and `.claude/settings.json` is version-controlled.**
+> The same review habit that applies to `.vscode/tasks.json` and `.githooks/` applies here:
+> treat a diff to it like a diff to a deploy script, and keep every hook a one-line call into a
+> tracked script under `scripts/hooks/` so the real logic goes through normal code review.
 
 ---
 

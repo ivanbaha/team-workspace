@@ -1,0 +1,23 @@
+# Production runs more replicas than dev/test. Kept as a named patch rather than a
+# forked deployment.yaml, so a change to the base container spec still reaches prod.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: users-service
+spec:
+  replicas: 4
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: products-service
+spec:
+  replicas: 4
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: host-frontend
+spec:
+  replicas: 3

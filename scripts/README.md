@@ -15,9 +15,18 @@ Full behavioural reference: [Workspace Automation](../docs/guides/workspace-auto
 | `update-workspace.mjs` | `yarn update` | Pull all nested repos; clone any that are missing |
 | `install-git-hooks.mjs` | `yarn hooks:install` | Point git at `.githooks/` and repair the executable bit |
 | `daily-setup-guard.mjs` | `yarn daily-setup` | Once-per-day flow, run automatically on folder open |
+| `sync-agent-rules.mjs` | `yarn rules:sync` / `rules:check` | Generate the per-agent rule pointers from `.ai/rules/` + `CONTRIBUTING.md` |
+| `sync-skill-wrappers.mjs` | `yarn skills:sync` / `skills:check` | Generate the per-agent skill wrappers from each canonical `SKILL.md`'s frontmatter |
+| [`hooks/`](./hooks/README.md) | wired in `.claude/settings.json` | Four agent guards: secrets, protected branches, docs-index staleness, git-ops overlay builds |
 | `lib/repo-sync.mjs` | — | Shared clone/pull logic + docs-change detection |
 | `lib/docs-ingest.mjs` | — | Shared rebuild decision + foreground ingest runner |
 | `lib/doc-markdown.mjs` | — | The single definition of "documentation markdown" |
+
+`yarn agents:check` runs both `rules:check` and `skills:check` — the CI-facing
+form. The two generators exist for the same reason: every coding agent reads its
+instructions from a different conventional path, and six hand-maintained copies
+of the same text drift silently. Generated and verified, the duplication costs
+nothing while every agent still finds its file where it looks.
 
 The `lib/` modules exist so the hooks and the setup scripts share one
 implementation. In particular `doc-markdown.mjs` holds the CHANGELOG exclusion:

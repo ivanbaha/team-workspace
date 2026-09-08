@@ -4,3 +4,8 @@ build/
 .env
 *.local
 .DS_Store
+
+# Skill scratch output — scan logs, fix plans, promotion reports. Regenerated on
+# every run and frequently large; the skills that produce it say to delete it.
+.ai/skills/*/output/*
+!.ai/skills/*/output/.gitkeep

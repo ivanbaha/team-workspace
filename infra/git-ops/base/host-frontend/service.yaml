@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: host-frontend
+  labels:
+    app.kubernetes.io/name: host-frontend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: host-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

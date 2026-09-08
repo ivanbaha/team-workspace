@@ -1,81 +1,105 @@
 {
-  "$comment": "Replace 'your-org' with your real Git host/org. Entries still pointing at 'your-org' are treated as unconfigured placeholders: they are skipped with a notice instead of failing setup, so a fresh clone of this example workspace runs green out of the box.",
+  "$comment": "Replace 'your-org' with your real Git host/org. Entries still pointing at 'your-org' are treated as unconfigured placeholders: they are skipped with a notice instead of failing setup, so a fresh clone of this example workspace runs green out of the box. `localPath` and `projectId` are read by the agent skills, not by the setup scripts: `localPath` is where the repo lands on disk (`path` + `name`), and `projectId` is the GitLab project id the MCP tools address it by. A skill must NEVER guess a project id — a wrong one posts comments on, or pushes to, a stranger's repository.",
   "frontends": [
     {
       "name": "users-frontend",
-      "description": "Microfrontend \u2014 Users domain UI (profile, settings, authentication)",
+      "description": "Microfrontend — Users domain UI (profile, settings, authentication)",
       "git": "git@github.com:your-org/tw-users-frontend.git",
-      "path": "./frontend"
+      "path": "./frontend",
+      "localPath": "frontend/users-frontend",
+      "projectId": 1001
     },
     {
       "name": "products-frontend",
-      "description": "Microfrontend \u2014 Products domain UI (catalogue, detail, search)",
+      "description": "Microfrontend — Products domain UI (catalogue, detail, search)",
       "git": "git@github.com:your-org/tw-products-frontend.git",
-      "path": "./frontend"
+      "path": "./frontend",
+      "localPath": "frontend/products-frontend",
+      "projectId": 1002
     },
     {
       "name": "host-frontend",
-      "description": "Host React application \u2014 composes all microfrontends at runtime",
+      "description": "Host React application — composes all microfrontends at runtime",
       "git": "git@github.com:your-org/tw-host-frontend.git",
-      "path": "./frontend"
+      "path": "./frontend",
+      "localPath": "frontend/host-frontend",
+      "projectId": 1003
     }
   ],
   "backends": [
     {
       "name": "users-service",
-      "description": "REST API \u2014 Users domain (accounts, authentication, profile)",
+      "description": "REST API — Users domain (accounts, authentication, profile)",
       "git": "git@github.com:your-org/tw-users-service.git",
-      "path": "./backend"
+      "path": "./backend",
+      "localPath": "backend/users-service",
+      "projectId": 2001
     },
     {
       "name": "products-service",
-      "description": "REST API \u2014 Products domain (catalogue, inventory, pricing)",
+      "description": "REST API — Products domain (catalogue, inventory, pricing)",
       "git": "git@github.com:your-org/tw-products-service.git",
-      "path": "./backend"
+      "path": "./backend",
+      "localPath": "backend/products-service",
+      "projectId": 2002
     }
   ],
   "libs": [
     {
       "name": "tw-tracing",
-      "description": "The Trace-Id contract \u2014 header name, id format, and the middleware that seeds it. Depended on by tw-logger and tw-http-connector",
+      "description": "The Trace-Id contract — header name, id format, and the middleware that seeds it. Depended on by tw-logger and tw-http-connector",
       "git": "git@github.com:your-org/tw-tracing.git",
-      "path": "./libs"
+      "path": "./libs",
+      "localPath": "libs/tw-tracing",
+      "projectId": 3001
     },
     {
       "name": "tw-logger",
       "description": "NestJS JSON logger emitting the trace id on every record, plus the request/response log pair traces are reconstructed from",
       "git": "git@github.com:your-org/tw-logger.git",
-      "path": "./libs"
+      "path": "./libs",
+      "localPath": "libs/tw-logger",
+      "projectId": 3002
     },
     {
       "name": "tw-http-connector",
-      "description": "Outbound HTTP connector for NestJS services \u2014 propagates the trace id to the next service, with retries and masked verbose logging",
+      "description": "Outbound HTTP connector for NestJS services — propagates the trace id to the next service, with retries and masked verbose logging",
       "git": "git@github.com:your-org/tw-http-connector.git",
-      "path": "./libs"
+      "path": "./libs",
+      "localPath": "libs/tw-http-connector",
+      "projectId": 3003
     },
     {
       "name": "tw-common-frontend",
       "description": "Shared React hooks, context providers, and UI primitives used across all microfrontends",
       "git": "git@github.com:your-org/tw-common-frontend.git",
-      "path": "./libs"
+      "path": "./libs",
+      "localPath": "libs/tw-common-frontend",
+      "projectId": 3004
     },
     {
       "name": "tw-api-client",
       "description": "Typed HTTP client wrappers for all internal REST APIs, shared by frontends",
       "git": "git@github.com:your-org/tw-api-client.git",
-      "path": "./libs"
+      "path": "./libs",
+      "localPath": "libs/tw-api-client",
+      "projectId": 3005
     },
     {
       "name": "tw-common-backend",
       "description": "Shared NestJS guards, JWT utilities, and error-handling helpers used across all backend services",
       "git": "git@github.com:your-org/tw-common-backend.git",
-      "path": "./libs"
+      "path": "./libs",
+      "localPath": "libs/tw-common-backend",
+      "projectId": 3006
     },
     {
       "name": "tw-config",
       "description": "Centralised environment variable loader and schema validation for all services",
       "git": "git@github.com:your-org/tw-config.git",
-      "path": "./libs"
+      "path": "./libs",
+      "localPath": "libs/tw-config",
+      "projectId": 3007
     }
   ]
 }

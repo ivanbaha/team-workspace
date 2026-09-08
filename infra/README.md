@@ -12,9 +12,22 @@ Infrastructure configuration and GitOps resources for all environments.
 
 ## Philosophy
 
-Infrastructure is treated as code. All changes go through pull requests and pass automated linting (e.g. `kubeval`, `helm lint`) before merging.
+Infrastructure is treated as code. All changes go through merge requests and must build
+(`kubectl kustomize`) before merging.
 
-Environment promotion follows the path: `dev -> test -> staging -> production`.
+There are three environments, and promotion is one-directional:
+
+```
+dev  ──(promote)──▶  test  ──(promote)──▶  prod
+```
+
+`dev` tracks `main` automatically and is allowed to be unstable. `test` is the stable set QA
+works against and changes only through a release MR. `prod` is deployed manually in a release
+window, and only ever from a composition that has been in `test`.
+
+The promotion is prepared by the [`release-mr`](../.ai/skills/release-mr/SKILL.md) skill; the
+rule behind it is in
+[`.ai/rules/environments-and-ownership.md`](../.ai/rules/environments-and-ownership.md).
 
 ---
 
@@ -34,6 +47,11 @@ requirement is small but not optional: see
 ## Tooling
 
 - Kubernetes (k8s) for container orchestration
-- Helm for templated manifests
+- Kustomize for environment overlays — one base, three overlays, no templating language
 - ArgoCD for GitOps continuous delivery
 - Terraform for cloud resource provisioning
+
+```bash
+yarn gitops:versions     # what is pinned in each environment, drift marked
+yarn gitops:validate     # do all three overlays still build?
+```

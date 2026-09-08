@@ -1,0 +1,61 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# prod — PRODUCTION. Deployed manually, inside a release window.
+#
+# Every version here has been in test first. A tag that appears in this file without
+# having been in overlays/test/kustomization.yaml is a process failure, not a shortcut:
+# see .ai/rules/environments-and-ownership.md.
+
+namespace: team-workspace-prod
+
+resources:
+  - ../../base
+
+patches:
+  - path: replicas.yaml
+
+# ── Pinned versions ─────────────────────────────────────────────────────────
+# THE deployed version of each service. `release-mr` reads this block from the
+# source environment and writes it here; nothing else may edit it.
+images:
+  - name: registry.example.com/team-workspace/users-service
+    newTag: 1.8.1
+  - name: registry.example.com/team-workspace/products-service
+    newTag: 2.3.7
+  - name: registry.example.com/team-workspace/host-frontend
+    newTag: 3.1.4
+  - name: registry.example.com/team-workspace/users-frontend
+    newTag: 1.7.0
+  - name: registry.example.com/team-workspace/products-frontend
+    newTag: 1.4.6
+
+# ── Configuration ───────────────────────────────────────────────────────────
+configMapGenerator:
+  - name: users-service-env
+    behavior: create
+    envs:
+      - config/users-service.env
+  - name: products-service-env
+    behavior: create
+    envs:
+      - config/products-service.env
+  - name: host-frontend-env
+    behavior: create
+    envs:
+      - config/host-frontend.env
+  - name: users-frontend-env
+    behavior: create
+    envs:
+      - config/users-frontend.env
+  - name: products-frontend-env
+    behavior: create
+    envs:
+      - config/products-frontend.env
+
+generatorOptions:
+  # Without this, kustomize appends a content hash to the ConfigMap name and
+  # rewrites every envFrom reference. That is the safer default in general — it
+  # forces a roll when config changes — but it makes a promotion diff unreadable,
+  # because every service shows a changed reference whether or not its values moved.
+  disableNameSuffixHash: true

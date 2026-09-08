@@ -87,14 +87,24 @@ export const SOURCES = [
   // Connector docs describe real, runnable tooling and its output contract —
   // genuine knowledge, worth retrieving.
   //
-  // `skills` is excluded. Skill files are INSTRUCTIONS ADDRESSED TO AN AGENT,
-  // not knowledge about the system, and every agent already receives them
-  // through its own wrapper (.github/skills, .kiro/skills, .agents/skills,
-  // .claude/commands) which routes to the canonical body in .ai/skills. They
-  // are delivered by the agent runtime, so indexing them adds a second, worse
-  // delivery path: procedural text competing with reference docs in a ranked
-  // list, matching on the domain words it necessarily contains.
-  { base: '.ai', match: 'all', exclude: ['skills'] },
+  // `skills` and `rules` are excluded, for the same reason. Both are
+  // INSTRUCTIONS ADDRESSED TO AN AGENT, not knowledge about the system, and
+  // every agent already receives them: skills through its own wrapper
+  // (.github/skills, .kiro/skills, .agents/skills, .claude/commands) routing to
+  // the canonical body in .ai/skills, and rules through its pointer file
+  // (AGENTS.md, CLAUDE.md, .github/copilot-instructions.md, …) routing to
+  // CONTRIBUTING.md and .ai/rules. They are delivered by the agent runtime, so
+  // indexing them adds a second, worse delivery path: procedural text competing
+  // with reference docs in a ranked list, matching on the domain words it
+  // necessarily contains.
+  //
+  // The rules are the sharper case of the two. `.ai/rules/environments-and-
+  // ownership.md` says what dev/test/prod MEAN; `infra/git-ops/README.md` says
+  // what is actually deployed to them. Both answer "how do environments work
+  // here" on the same vocabulary, and only one of them is a fact about the
+  // system — so a ranked list that can return either is a list that sometimes
+  // answers a factual question with a policy.
+  { base: '.ai', match: 'all', exclude: ['skills', 'rules'] },
 
   // ── Service READMEs ───────────────────────────────────────────────────────
   // depth: 1 means a newly cloned service is picked up on the next ingest with

@@ -1,0 +1,58 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# test — STABLE. This is what QA works against.
+#
+# Nothing here changes except through a promotion: a release/* branch prepared by the
+# `release-mr` skill, reviewed, and merged. A hand-edit that reaches test outside that
+# flow is a version nobody can trace back to a release.
+
+namespace: team-workspace-test
+
+resources:
+  - ../../base
+
+# ── Pinned versions ─────────────────────────────────────────────────────────
+# THE deployed version of each service. `release-mr` reads this block from the
+# source environment and writes it here; nothing else may edit it.
+images:
+  - name: registry.example.com/team-workspace/users-service
+    newTag: 1.8.3
+  - name: registry.example.com/team-workspace/products-service
+    newTag: 2.4.0
+  - name: registry.example.com/team-workspace/host-frontend
+    newTag: 3.1.4
+  - name: registry.example.com/team-workspace/users-frontend
+    newTag: 1.7.2
+  - name: registry.example.com/team-workspace/products-frontend
+    newTag: 1.4.6
+
+# ── Configuration ───────────────────────────────────────────────────────────
+configMapGenerator:
+  - name: users-service-env
+    behavior: create
+    envs:
+      - config/users-service.env
+  - name: products-service-env
+    behavior: create
+    envs:
+      - config/products-service.env
+  - name: host-frontend-env
+    behavior: create
+    envs:
+      - config/host-frontend.env
+  - name: users-frontend-env
+    behavior: create
+    envs:
+      - config/users-frontend.env
+  - name: products-frontend-env
+    behavior: create
+    envs:
+      - config/products-frontend.env
+
+generatorOptions:
+  # Without this, kustomize appends a content hash to the ConfigMap name and
+  # rewrites every envFrom reference. That is the safer default in general — it
+  # forces a roll when config changes — but it makes a promotion diff unreadable,
+  # because every service shows a changed reference whether or not its values moved.
+  disableNameSuffixHash: true

@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Environment-agnostic definition of every service. Nothing here is specific to
+# dev, test or prod: no namespace, no real image tag, no configuration values.
+# The overlays supply all three.
+#
+# The image tags below are the placeholder 0.0.0-base. An overlay that forgets to
+# pin a service therefore fails to pull rather than silently deploying whatever
+# :latest happens to be — a missing pin should be loud.
+
+resources:
+  - users-service
+  - products-service
+  - host-frontend
+  - users-frontend
+  - products-frontend
+
+# `labels` rather than the deprecated `commonLabels`: this stamps the label onto
+# metadata and pod templates without adding it to selectors. A label that lands in
+# a Deployment's selector is immutable after the first apply, so putting a
+# workspace-wide label there would make every future rename an in-place delete.
+labels:
+  - includeSelectors: false
+    includeTemplates: true
+    pairs:
+      app.kubernetes.io/part-of: team-workspace

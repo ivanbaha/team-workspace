@@ -1,18 +1,12 @@
 ---
 name: debug-and-report
-description: Debug a production/test issue using logs and codebase analysis, then create a Jira bug ticket with all findings
+description: Debug a production or test issue using logs and codebase analysis, then optionally create a Jira bug ticket with all findings. Use when the user reports something broken in an environment, gives a trace id, or asks to investigate an error and raise a bug.
 ---
 
-<!-- GitHub Copilot wrapper — points to the canonical agent-neutral skill -->
+<!-- GENERATED FILE — DO NOT EDIT. Run `yarn skills:sync`. -->
+<!-- GitHub Copilot wrapper — the canonical skill is agent-neutral. -->
 
-# Debug & Report
+Follow the full instructions in `.ai/skills/debug-and-report/SKILL.md` exactly, from Step 1.
 
-Follow the full instructions in `.ai/skills/debug-and-report/SKILL.md` exactly.
-
-Key entry points depending on what the user provides:
-
-- **trace-id given** → go straight to Step 2 (log search) using it as `--search`
-- **service name given** → resolve exact name via `backend/README.md`, then Step 2
-- **vague description only** → ask one focused follow-up question first (see Step 1)
-
-Connectors live in `.ai/connectors/`. Run them with `node`, no install needed (Node 18+).
+Connectors live in `.ai/connectors/` and run directly with `node` — no install step
+(Node 18+). Workspace rules are in `CONTRIBUTING.md`.

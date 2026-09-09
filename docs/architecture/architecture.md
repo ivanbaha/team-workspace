@@ -23,6 +23,11 @@ host-frontend (port 3000)
 Every arrow above carries the same `x-trace-id` header — see
 [Observability](#observability).
 
+**In this repository the frontend arrows do not fire.** The demo frontends are scaffolds that make
+no API calls, so a trace you produce here starts at the first backend service. Production mints the
+id in a browser `fetch` interceptor; the delta is listed in
+[What this repository does and does not demonstrate](./distributed-tracing.md#what-this-repository-does-and-does-not-demonstrate).
+
 ---
 
 ## Microfrontend Integration
@@ -52,8 +57,10 @@ the workspace's one service-to-service hop, and it is where propagation is easie
 
 ## Observability
 
-Every request carries an `x-trace-id` header, and every service writes it as a `traceId` field on
-every log line. One query returns the whole chain of a request across all services.
+Every request carries an `x-trace-id` header — minted by the browser in production, by the first
+backend service here — and every service writes it as a `traceId` field on every log line, alongside
+a `user-agent` that names the caller and supplies the edges. One query returns the whole chain of a
+request across all services.
 
 ```logql
 {namespace=~"team-workspace"} |= "01M0J6EYRY4TFEPR9PHJZ1QHPF"

@@ -105,7 +105,7 @@ request-logging interceptor. The rejection is still logged under the trace id by
 filter — you will see the `warn` line but no span:
 
 ```txt
-15:21:43.745  warn  products-service  GET /v1/products/1   401 UNAUTHENTICATED: No token provided
+2026-09-09T12:40:03.690Z [WARN] [products-service] [GET /v1/products/1] [01M232XDV9WAZG97TH6BSCZ17Q] 401 UNAUTHENTICATED: No token provided
 ```
 
 Zero spans plus a 401 warning is a complete, correct trace of an unauthenticated request.

@@ -31,8 +31,11 @@ export class ProductsService {
     this.logger.info(`Returning ${result.length} product(s)`, `${CONTEXT}.findAll`);
     if (!expandOwner) return result;
 
-    // One outbound call per distinct owner, all inheriting the same trace id — so the trace shows
-    // this fan-out as several products-service → users-service edges under one request.
+    // One outbound call per *product*, not per distinct owner — products sharing an owner each
+    // fetch it again. That is a real N+1, left in deliberately: it is what the trace tooling
+    // surfaces as a `repeatedEdges` entry, and it is the worked example in the tracing docs.
+    // All the calls inherit the same trace id, so the fan-out shows as several
+    // products-service → users-service edges under one request.
     return Promise.all(result.map((product) => this.withOwner(product)));
   }
 

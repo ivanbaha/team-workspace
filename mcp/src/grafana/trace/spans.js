@@ -138,9 +138,10 @@ export function buildEdges(spans) {
 /**
  * Nests spans into a call tree.
  *
- * A span's parent is the *nearest preceding* span belonging to its reported caller. "Nearest" rather
- * than "first" because pod clocks are not synchronised: a callee's log can predate its caller's by a
- * few milliseconds, and a strict start-time comparison would promote a nested call to a root.
+ * A span's parent is the span belonging to its reported caller whose start time is *nearest in
+ * either direction* — smallest absolute difference, not the nearest earlier one. Pod clocks are not
+ * synchronised, so a callee's log can predate its caller's by a few milliseconds; requiring the
+ * parent to start first would promote a genuinely nested call to a root over a rounding error.
  */
 export function buildCallTree(spans) {
   const nodes = spans.map((span) => ({ ...span, children: [] }));

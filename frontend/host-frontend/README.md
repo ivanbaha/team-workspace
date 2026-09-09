@@ -20,10 +20,14 @@ The host owns the first hop of every distributed trace. `installTraceInterceptor
 `window.fetch` so each call to our own APIs carries a freshly minted ULID in `x-trace-id`; the
 services inherit it, and the whole request chain lands in the logs under one id.
 
-```ts
+```jsx
 // src/index.jsx — before mounting any remote
-installTraceInterceptor([import.meta.env.VITE_API_ORIGIN]);
+installTraceInterceptor([process.env.API_ORIGIN ?? window.location.origin]);
 ```
+
+Source: [`src/tracing/install-trace-interceptor.js`](./src/tracing/install-trace-interceptor.js).
+**Nothing in this repository calls it** — these apps make no API calls — so demo traces start at the
+backend. The code is here because it is what production does and what the architecture doc links to.
 
 **It belongs here and nowhere else.** Remotes share this `window`, so a remote that installs its own
 stacks a second patch on top of the host's — three wrappers deep, with a load-order dependency

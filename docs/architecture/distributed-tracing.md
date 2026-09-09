@@ -192,8 +192,13 @@ frontend would then have to own and get right.
 Framework-agnostic, and the whole of it. In this workspace it belongs to
 [host-frontend](../../frontend/host-frontend/README.md):
 
+The full version lives at
+[`frontend/host-frontend/src/tracing/install-trace-interceptor.js`](../../frontend/host-frontend/src/tracing/install-trace-interceptor.js)
+— it hand-rolls the ULID rather than importing `ulidx`, because the frontends carry no dependencies.
+Abridged here:
+
 ```ts
-// src/tracing/install-trace-interceptor.ts
+// frontend/host-frontend/src/tracing/install-trace-interceptor.js
 import { ulid } from 'ulidx';
 
 const TRACE_ID_HEADER = 'x-trace-id';
@@ -286,15 +291,39 @@ tell which client a request came from, and nothing beyond the frontend needs to 
 
 ---
 
+## What this repository does and does not demonstrate
+
+This workspace is an example, not the production system the design came from. Everything under
+`libs/` and `backend/` is real, runs, and is what the deep links point at. Four things described
+here are **production behaviour the demo does not exercise**, and it is worth knowing which,
+because a reader who assumes otherwise will go looking for code that is not here.
+
+| Behaviour | In production | In this repo |
+|---|---|---|
+| **Frontend-minted ids** | The browser mints the id; every trace starts there | The [interceptor](../../frontend/host-frontend/src/tracing/install-trace-interceptor.js) is real code and the host installs it — but the demo frontends are illustrative scaffolds with no dependencies and **no API calls at all**, so nothing is intercepted. In practice **demo traces start at the backend** |
+| **Gateway-minted ids** | Non-browser traffic gets an id at the gateway, in a format that distinguishes it from frontend traffic | Absent. `traceIdMiddleware` seeds anything that arrives without an id, so a demo request from `curl` is minted by the first service |
+| **Scheduled work with derived ids** | Sync jobs mint a session id and `deriveTraceId` per page and per chunk | The pattern is [documented](#4-the-manual-fallback) and `deriveTraceId` is implemented and tested, but no demo job exercises it. Adding one needs a scheduler dependency the demo does not carry |
+| **Context auto-extraction** | Derived from the call stack when omitted | **Present here too** — `detectCaller()` is wired into `logger.service.ts` and runs whenever `context` is omitted. The demo services pass explicit contexts because that is the recommendation, not because the fallback is missing |
+
+The first three are simplifications. The fourth is in the repo; it is listed because it is easy to
+conclude from the service code that it is not.
+
+---
+
 ## Implementation
 
 Three packages, and the split between them is the design:
 
 | Package | Role | Size |
 |---|---|---|
-| [@tw/tracing](../../libs/tw-tracing/README.md) | The contract: header name, id format, the seed | ~120 lines |
-| [@tw/logger](../../libs/tw-logger/README.md) | Writes the id into every log line; emits the request/response pair | ~600 lines |
-| [@tw/http-connector](../../libs/tw-http-connector/README.md) | Carries the id to the next service | ~400 lines |
+| [@tw/tracing](../../libs/tw-tracing/README.md) | The contract: header name, id format, the seed | 88 lines |
+| [@tw/logger](../../libs/tw-logger/README.md) | Writes the id into every log line; emits the request/response pair | 587 lines |
+| [@tw/http-connector](../../libs/tw-http-connector/README.md) | Carries the id to the next service | 386 lines |
+
+**Every line count in this document is code lines** — excluding blanks and comments, excluding
+tests. These files are commented far above normal density, so the physical file sizes are roughly
+three times larger (`@tw/tracing` is 88 code lines across 278 physical). Counting one way in one
+place and the other way in another is how a "~120 lines" claim survives being wrong in both.
 
 `@tw/logger` and `@tw/http-connector` both depend on `@tw/tracing` and not on each other, so the
 header name and the id format are defined exactly once for the whole workspace.
@@ -348,9 +377,14 @@ a global interceptor breaks in two ways:
 Middleware is the only stage that runs before both. Verified locally — a request with no bearer
 token produces no request-log pair at all, and the trace id still ties the rejection to the caller:
 
-```txt
-15:21:43.745  warn  products-service  GET /v1/products/1   401 UNAUTHENTICATED: No token provided
+```json
+{"timestamp":"2026-09-09T12:40:04.756Z","level":"warn","serviceName":"products-service",
+ "context":"GET /v1/products/1","traceId":"01M232XEWK5VPM5QEC4FS9ENE3",
+ "message":"401 UNAUTHENTICATED: No token provided"}
 ```
+
+The `traceId` on that line is the whole argument: the request never reached an interceptor, so there
+is no span — and it is still attributable to the caller that sent it.
 
 > **If you run the interceptor form elsewhere, check this.** Requests that arrive *with* an inbound
 > id work fine — the interceptor has nothing to do. Only the seeding hop loses its id, so the
@@ -678,9 +712,9 @@ That is the whole developer contract. **No** span creation, no context managers,
 - **The failure mode is benign.** If the log store is down you lose *search*, not the request. There
   is no exporter in the request path to block, buffer, or drop, and no sampling decision that can
   discard the one trace you needed.
-- **The engineering cost is genuinely small.** The mechanism is ~120 lines in `@tw/tracing`, ~70 in
-  the request-scoped logger, ~65 in the request-scoped connector, and ~170 in the request-logging
-  interceptor.
+- **The engineering cost is genuinely small.** The mechanism is 88 code lines in `@tw/tracing`, 37
+  in the request-scoped logger, 35 in the request-scoped connector, and 121 in the request-logging
+  interceptor — 281 lines for the whole of it.
 
 ### What is NOT true — do not claim these
 
@@ -843,7 +877,7 @@ every service, apply the config change, run the gates locally (tests, linters, a
 probe), push. That is a scripted job, not a project.
 
 That is the real argument for the three-package split, and it is worth stating plainly because the
-packages otherwise look like ceremony around ~120 lines of code: **the split is what makes a change
+packages otherwise look like ceremony around 88 lines of code: **the split is what makes a change
 to the contract a routine action instead of a migration.** A team that inlines the header name at
 each call site has the same system on day one and no way to change it on day two.
 

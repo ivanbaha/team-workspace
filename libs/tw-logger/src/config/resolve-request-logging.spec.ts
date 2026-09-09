@@ -6,7 +6,8 @@ describe('resolveRequestLoggingMode', () => {
     expect(resolveRequestLoggingMode(undefined, 'info')).toBe('compact');
   });
 
-  it('upgrades to full when the level is silly', () => {
+  it('upgrades to full at verbose, and at its deprecated alias silly', () => {
+    expect(resolveRequestLoggingMode(undefined, 'verbose')).toBe('full');
     expect(resolveRequestLoggingMode(undefined, 'silly')).toBe('full');
   });
 

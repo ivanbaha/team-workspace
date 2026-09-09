@@ -39,8 +39,15 @@ Two consequences worth knowing before touching API code:
 - **The interceptor is installed once, by the host.** It patches `window.fetch`, which Module
   Federation remotes share. A remote that installs its own stacks a second patch on the first.
 
-Both, with the interceptor itself and the CORS headers it depends on:
+Both, with the CORS headers it depends on:
 [The entry point — the browser](../docs/architecture/distributed-tracing.md#the-entry-point--the-browser).
+
+> **These apps are scaffolds.** They carry no dependencies, have no bundler config, and make no API
+> calls — so although
+> [`install-trace-interceptor.js`](./host-frontend/src/tracing/install-trace-interceptor.js) is real
+> and the host installs it, nothing in this repository is intercepted. Traces you produce by running
+> the demo start at the backend. See
+> [What this repository does and does not demonstrate](../docs/architecture/distributed-tracing.md#what-this-repository-does-and-does-not-demonstrate).
 
 ---
 

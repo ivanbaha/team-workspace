@@ -145,6 +145,9 @@ reads them, so lines written before the rename stay searchable for their whole r
 | `full` | `verbose`: the above plus masked headers and bodies |
 | `off` | nothing — traces lose their edges and durations |
 
+Unset, the mode follows the level: `verbose` (and its deprecated alias `silly`) gives `full`, every
+other level gives `compact`. Setting `LOGGER_REQUEST_LOGGING` explicitly always wins.
+
 The default is deliberate: tracing has to work in every environment with no configuration, because a
 service that must be reconfigured before it can be traced will not be traced on the day it breaks.
 
@@ -160,7 +163,7 @@ All from the environment; read once at construction.
 | `POD_NAME` | — | Kubernetes downward API. The service prefix is stripped |
 | `LOGGER_LEVEL` | `info` | `error`, `warn`, `info`, `debug`, `verbose` (`silly` is a deprecated alias for `verbose`) |
 | `LOGGER_FORMAT` | `json` | `pretty` for local development only — pretty output is not parseable |
-| `LOGGER_REQUEST_LOGGING` | follows level | `off`, `compact`, `full` |
+| `LOGGER_REQUEST_LOGGING` | `full` at `verbose`, else `compact` | `off`, `compact`, `full` |
 
 ```yaml
 # Kubernetes: POD_NAME comes from the downward API

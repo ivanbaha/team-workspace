@@ -6,33 +6,73 @@ How a request is followed across every service it touches, without a tracing sta
 
 ## The one-paragraph version
 
-A request carries a single ULID in an HTTP header called `x-trace-id`. Every service logs it as a
-field in a one-line JSON record written to stdout. The container runtime already captures stdout; a
+A request carries a single ULID in an HTTP header called `x-trace-id`, and every service says who it
+is in `user-agent`. Every service logs both as fields in a one-line JSON record written to stdout. The container runtime already captures stdout; a
 node-level log shipper already forwards it; the log store already indexes the pod labels. So
-correlating a user action across a dozen services is one query — and because the header is inherited
+correlating one request across a dozen services is one query — and because the header is inherited
 automatically through NestJS request-scoped dependency injection, application developers write no
 correlation code at all.
 
-The total application-side implementation is one header, one middleware that seeds it, and two thin
-request-scoped wrapper providers: a logger and an HTTP connector. There is no tracing SDK, no span
+The total application-side implementation is two headers, one middleware that seeds the first, and
+two thin request-scoped wrapper providers: a logger and an HTTP connector. There is no tracing SDK, no span
 context, no exporter, and nothing running next to the application process.
 
 That is the whole architecture, and it is complete as described. The
 [agent tooling](#the-tooling-you-can-cheaply-build-on-top) at the end is something we chose to build
 afterwards. It is genuinely useful and it is not load-bearing.
 
+> **This describes an approach, not a drop-in.** What is worth copying is the four decisions in
+> [Applying this to other stacks](#applying-this-to-other-stacks) — not our specific values. Adopt
+> it deliberately and adjust it to the system in front of you: see
+> [Adapting it](#adapting-it--the-parts-that-are-ours-not-yours) for which parts are ours rather
+> than yours, and why changing them is cheap.
+
 ---
 
-## Anatomy of a Trace-Id
+## Anatomy of the contract
+
+### The contract is two headers, and only one of them is a trace id
+
+This is the part that is easy to get half-right, because half of it fails loudly and half of it does
+not.
+
+| Header | What it does | What happens when it is missing |
+|---|---|---|
+| `x-trace-id` | **Groups** every log line belonging to one request | The lines are unfindable. Obvious the first time you look for them |
+| `user-agent` | **Connects** them — the receiving service records it as `caller`, and `caller` is the only edge information a trace has | The lines are all there and every one of them is correct. There is simply no call graph, and the service shows up as an orphaned root |
+
+A flat id has no parent span id, so `caller` is not a convenience — it is the entire mechanism by
+which one service's span is known to be beneath another's. **A service that forwards `x-trace-id`
+and gets `user-agent` wrong produces traces that look complete and are wrong**, which is strictly
+worse than producing none.
+
+`@tw/http-connector` therefore treats the two identically: both are written last on every outbound
+call, both delete any other casing variant of themselves first, neither can be set through
+`headers`, and neither may appear in `forwardHeaders`. `userAgent` is a required option and
+`forRoot()` throws at boot without it — see
+[the identity is validated, not merely required](#the-identity-is-validated-not-merely-required).
+
+### The trace id
 
 | Property | Value | Source |
 |---|---|---|
 | Wire format | HTTP header `x-trace-id` (lowercase) | `libs/tw-tracing/src/constants.ts` |
-| Value format | **any non-empty string** — a ULID at HTTP entry points, service-built elsewhere | `ulidx` |
+| Value format | **any non-empty string**, capped at 128 chars inbound — a ULID at HTTP entry points, service-built elsewhere | `ulidx` |
 | Example | `01M0J6EYRY4TFEPR9PHJZ1QHPF` | |
 | Log field | `traceId` | `libs/tw-logger/src/formatters/json.formatter.ts` |
 | Response header | `x-trace-id`, echoed to the caller | `libs/tw-tracing/src/trace-id.middleware.ts` |
 | Indexed log label? | **No** — it lives in the log line body | see [Why not a label](#why-the-id-is-not-a-log-label) |
+
+### The identity
+
+| Property | Value | Source |
+|---|---|---|
+| Wire format | HTTP header `user-agent` | `libs/tw-http-connector/src/constants/index.ts` |
+| Value | the service's own name — **must equal `DEPLOYMENT_NAME`** | `HttpConnectionModule.forRoot({ userAgent })` |
+| Example | `products-service` | |
+| Log field | `caller`, on `direction: request.in` lines only | `libs/tw-logger/src/request-logging.interceptor.ts` |
+| Set by the browser? | **No — impossible.** `user-agent` is a forbidden header name in `fetch`/XHR | see [The entry point](#the-entry-point--the-browser) |
+| Validated? | **Yes, at module registration** | `libs/tw-http-connector/src/http-connection.module.ts` |
 
 **A ULID is a convention, not a contract.** Only the HTTP entry points mint one. Anything without an
 inbound request builds its own id, and all of these are legitimate:
@@ -46,6 +86,19 @@ inbound request builds its own id, and all of these are legitimate:
 The tooling therefore validates **nothing** about the format — a format check would refuse to trace
 real traffic. `deriveTraceId` appends rather than replaces, so a filter on the parent id returns the
 parent *and* every derived leg; substring matching is what makes that work.
+
+**Length is the one exception, and it is not a format check.** An id arriving on a request is an id
+we did not mint — at an edge service, it came from a browser — and it is then copied onto every log
+line of every service in the chain, so whatever length the caller chose is multiplied by the entire
+request fan-out. `ensureTraceId` truncates an inbound id to `MAX_TRACE_ID_LENGTH` (128) and does
+nothing else to it: the format stays open, and header values cannot carry control characters anyway
+because Node's HTTP parser rejects those first.
+
+The cap never fires on our own traffic — a ULID is 26 characters and `<ulid>-page-3-chunk-2` is
+under 50 — so backend-to-backend calls are unaffected by design rather than by exemption. There is
+no edge-vs-internal distinction to configure, and truncation is idempotent with one cap everywhere,
+so a long id is shortened once at the first hop and every service after it inherits the identical
+value. A cap that varied per service would split one trace in two.
 
 ### One place owns the contract
 
@@ -64,22 +117,22 @@ right. `@tw/tracing` exists to make that failure impossible.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant B as Browser / client
+    participant B as Browser — fetch interceptor
     participant P as products-service
     participant U as users-service
     participant O as stdout
 
-    Note over B: Client may mint an id per HTTP call
+    Note over B: The interceptor mints the ULID.<br/>It cannot set user-agent — forbidden header
     B->>P: GET /v1/products?expandOwner=true + x-trace-id 01M0J6…
     Note over P: traceIdMiddleware — header already<br/>present, so left untouched
-    P->>O: log line, traceId 01M0J6…, direction incoming
+    P->>O: log line, traceId 01M0J6…, request.in, caller browser
     Note over P: RequestScopedLoggerService reads<br/>req.headers x-trace-id — no argument passed
-    P->>U: RequestScopedHttpConnectionService<br/>re-attaches x-trace-id automatically
-    U->>O: log line, traceId 01M0J6…, direction incoming
+    P->>U: RequestScopedHttpConnectionService re-attaches<br/>x-trace-id, and user-agent products-service
+    U->>O: log line, traceId 01M0J6…, request.in, caller products-service
     U-->>P: 200
-    U->>O: log line, direction outgoing, status 200, duration 1ms
-    P-->>B: 200 + x-trace-id echoed back
-    P->>O: log line, direction outgoing, status 200, duration 23ms
+    U->>O: log line, response.out, status 200, duration 1ms
+    P-->>B: 200 + x-trace-id echoed back<br/>(needs Access-Control-Expose-Headers cross-origin)
+    P->>O: log line, response.out, status 200, duration 23ms
 ```
 
 ### From stdout to an answer
@@ -112,6 +165,124 @@ flowchart LR
 The important property of the second diagram: **the left half is not ours and not new.** Container
 stdout capture and a node-level log shipper exist whether or not anything is correlated. Our
 contribution is one field in the JSON and the tooling on the right.
+
+---
+
+## The entry point — the browser
+
+A trace does not start at products-service. It starts in the browser, in a `fetch` interceptor that
+mints one ULID per API call and sets `x-trace-id` before the request leaves the page. Everything the
+rest of this document describes is *inheritance* of that id: `ensureTraceId` only mints when the
+header is absent, so the first service to see the request adopts the browser's id rather than
+replacing it.
+
+That matters for a reason beyond tidiness. Without a frontend interceptor, the trace begins at the
+edge service and the most common real question — *the user says the page broke, what happened?* —
+starts one hop too late, with no way to get from what the user saw to the id that would answer it.
+
+**The scope is one id per HTTP call, deliberately — not one per user action.** A screen that fires
+three calls produces three traces, and `deriveTraceId` is *not* used here to tie them together.
+That looks like an omission and is a decision: whoever is debugging is working on one request chain,
+even when a form triggered several, so the id they need is the one for the call that misbehaved.
+Grouping calls under a per-action parent buys little for that job and costs a scoping concept the
+frontend would then have to own and get right.
+
+### The interceptor
+
+Framework-agnostic, and the whole of it. In this workspace it belongs to
+[host-frontend](../../frontend/host-frontend/README.md):
+
+```ts
+// src/tracing/install-trace-interceptor.ts
+import { ulid } from 'ulidx';
+
+const TRACE_ID_HEADER = 'x-trace-id';
+const MAX_TRACE_ID_LENGTH = 128; // matches @tw/tracing
+
+/**
+ * Wraps `window.fetch` so every call to our own APIs carries a trace id.
+ *
+ * @param apiOrigins - Origins that get the header. Everything else — CDNs, analytics, third-party
+ *   widgets — is left alone: a trace id is internal correlation data and there is no reason to
+ *   hand it to someone else's server.
+ */
+export function installTraceInterceptor(apiOrigins: string[]): void {
+  const original = window.fetch;
+
+  window.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    if (!apiOrigins.includes(new URL(request.url).origin)) return original(request);
+
+    // Inherit, never overwrite — the same rule the services follow. A caller that set the header
+    // meant it: a retry of a failed call is the same user action and belongs under the same id.
+    // The cap matches the services', so an id set here is never the thing that gets truncated.
+    const inherited = request.headers.get(TRACE_ID_HEADER);
+    const traceId = inherited ? inherited.slice(0, MAX_TRACE_ID_LENGTH) : ulid();
+    request.headers.set(TRACE_ID_HEADER, traceId);
+
+    const response = await original(request);
+
+    // Surfacing the id on failure is the point of the whole exercise: it is what a user can paste
+    // into a bug report, and what turns "the page broke" into one LogQL query.
+    if (!response.ok) console.error(`${request.method} ${request.url} failed under trace ${traceId}`);
+
+    return response;
+  };
+}
+```
+
+### Three things the browser changes about the contract
+
+**1. The browser cannot hold up the identity half — at all.** `user-agent` is browser-controlled:
+a page may ask, and the browser ignores it. Verified against a local echo server in Chromium 152 —
+`fetch('/probe', { headers: { 'User-Agent': 'trace-probe-ua' } })` arrives as:
+
+```json
+{"user-agent":"Mozilla/5.0 (Macintosh; …) Chrome/152.0.0.0 Safari/537.36",
+ "x-trace-id":"PROBE1","x-client-id":"products-frontend"}
+```
+
+The custom value is gone without an error; the two custom headers beside it went through untouched.
+So the frontend satisfies `x-trace-id` and *structurally cannot* satisfy `user-agent`, and
+`normalizeCaller` collapses anything Mozilla-shaped to the single node `browser`
+(`mcp/src/grafana/trace/parse.js`).
+
+**That is deliberate, and it has a consequence specific to this workspace.** host-frontend,
+users-frontend and products-frontend are three applications federated into one page — and in every
+trace they are **one** node called `browser`. Nothing distinguishes a call made by the products
+catalogue from one made by the account settings screen.
+
+If per-microfrontend attribution is wanted, it needs a header of its own. `x-client-id:
+products-frontend` goes through fine — it is in the probe above — so the cost is one line in the
+interceptor plus a branch in `normalizeCaller` preferring it over the UA, and one more entry in
+`Access-Control-Allow-Headers`. **That is an open decision, not something the current implementation
+does.** Until it is taken, read `browser` as "the page", not "the app".
+
+**2. Cross-origin, two CORS headers are load-bearing.** Same-origin (the usual dev setup, and a
+host serving its API under the same domain) needs neither, which is exactly why this breaks in
+production and not locally:
+
+| Header on the API response | Without it |
+|---|---|
+| `Access-Control-Allow-Headers: x-trace-id` | The preflight fails and **the request never happens** — loud, and caught immediately |
+| `Access-Control-Expose-Headers: x-trace-id` | The request succeeds and `response.headers.get('x-trace-id')` returns `null`. The echo from `traceIdMiddleware` is invisible to the page, so the id never reaches a bug report — silent |
+
+**3. Install it once, in the host.** The interceptor monkey-patches `window.fetch`, and Module
+Federation remotes share one `window`. If each microfrontend installs its own, the patches stack:
+three wrappers deep, three chances for one of them to mint a second id, and a load-order dependency
+nobody wants to debug. The host installs it before mounting any remote; remotes just call `fetch`.
+
+### One interceptor per HTTP client actually in use
+
+The code above patches `fetch` because that is what it patches — it is not a claim that `fetch` is
+the only client worth covering. An app calling through axios, a bare `XMLHttpRequest`, `sendBeacon`
+or `EventSource` needs the equivalent hook in each, and a client left uncovered sends no
+`x-trace-id` at all while everything continues to look normal.
+
+Cover what the app actually uses and no more. In our own frontends that is **two** interceptors —
+axios for the legacy code paths, `fetch` for newer ones — which is the honest shape of most real
+codebases mid-migration. Both set the same header the same way, so the services downstream cannot
+tell which client a request came from, and nothing beyond the frontend needs to know.
 
 ---
 
@@ -168,7 +339,7 @@ a global interceptor breaks in two ways:
    through `APP_INTERCEPTOR`, and NestJS pushes those onto the global interceptor list during
    `NestFactory.create()` — *before* anything added afterwards by `app.useGlobalInterceptors()`
    (`ApplicationConfig.addGlobalInterceptor` pushes; `useGlobalInterceptors` concatenates later). A
-   seed registered as a global interceptor therefore runs **second**, and the incoming/outgoing pair
+   seed registered as a global interceptor therefore runs **second**, and the request.in/response.out pair
    for a request that arrived without an id is logged without one. That request is the first hop of
    every trace — precisely the one you cannot afford to lose.
 2. **Guards run before interceptors at all.** A request rejected by an auth guard never reaches an
@@ -286,20 +457,56 @@ An explicit `params.traceId` wins; inheritance is the fallback, never an overrid
 trace id is deliberately **not** part of `forwardHeaders` — it has its own dedicated path, so no
 reconfiguration of header forwarding can silently switch tracing off.
 
-Where the header reaches the wire, `http-connection.service.ts`:
+Where both contract headers reach the wire, `http-connection.service.ts` — one rule applied twice:
 
 ```ts
-if (traceId) {
-  // Remove any existing casing variant to avoid duplicates on the wire.
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === TRACE_ID_HEADER) delete headers[key];
-  }
-  headers[TRACE_ID_HEADER] = traceId;
-}
+const headers: Record<string, string> = { ...incoming };
+
+// Written last, and every other casing variant deleted first. Both of them, every call.
+this.setContractHeader(headers, USER_AGENT_HEADER, userAgent ?? this.options.userAgent, 'User-Agent');
+if (traceId) this.setContractHeader(headers, TRACE_ID_HEADER, traceId);
 ```
 
 A request carrying both `X-Trace-Id` and `x-trace-id` is a request whose receiver picks one at
-random. The dedupe loop guarantees exactly one variant.
+random. The same is true of `User-Agent` and `user-agent`, with one extra twist that makes it worse:
+they are two distinct keys in a plain object and become one header only at the `fetch` boundary,
+where they are **combined** into `orders-service, curl/8.4.0` rather than resolved. Nothing before
+the wire would have shown it. Writing both headers through the same delete-then-write helper is what
+guarantees exactly one of each.
+
+Because they are written *after* the caller's headers, neither can be overridden through `headers`.
+The one deliberate escape hatch is the per-call `userAgent` option, for a third-party API that
+demands a specific identity and is not part of our traces anyway.
+
+#### The identity is validated, not merely required
+
+`userAgent` has always been required by `IHttpConnectionOptions`. That is not the same as being
+enforced, and this is the one field where the difference is expensive:
+
+```ts
+HttpConnectionModule.forRoot({ userAgent: process.env.DEPLOYMENT_NAME, logger })
+```
+
+Well-typed at compile time, `undefined` at runtime in any deployment that does not set the variable.
+`forRoot` drops explicitly-undefined keys so no default fills it in, and the service boots, serves
+traffic, and identifies itself as `"undefined"` on every outbound call. Nothing throws, every log
+line still validates, and the service silently vanishes from the call graph of every trace it takes
+part in.
+
+So `forRoot()` now refuses to build the module:
+
+- **A missing, blank or non-string `userAgent` throws at registration.** Failing at boot is the only
+  cheap detection point; the alternative is noticing months later that one service's calls have
+  always been orphaned roots.
+- **`forwardHeaders` may not contain `user-agent` or `x-trace-id`.** Both are written
+  unconditionally, so forwarding one as well means the inbound value — the browser's
+  `Mozilla/5.0…` — competes with the connector's own for the same header.
+
+What is still *not* checked, because the connector cannot see it: that `userAgent` equals the
+`serviceName` the logger uses. Both read `DEPLOYMENT_NAME` in `app.module.ts` for exactly that
+reason. `spans.js` keeps a `CALLER_ALIASES` map for services where they drifted, and its own comment
+calls it "a workaround, not a fix" — an entry there means a chain that only reconstructs for someone
+holding this tool.
 
 | | `HttpConnectionService` | `RequestScopedHttpConnectionService` |
 |---|---|---|
@@ -348,17 +555,49 @@ emitted by `libs/tw-logger/src/request-logging.interceptor.ts`, auto-registered 
 `APP_INTERCEPTOR`:
 
 ```json
-{"direction":"incoming","method":"GET","path":"/v1/users/1","caller":"products-service"}
-{"direction":"outgoing","method":"GET","path":"/v1/users/1","statusCode":200,"duration":1}
+{"direction":"request.in","method":"GET","path":"/v1/users/1","caller":"products-service"}
+{"direction":"response.out","method":"GET","path":"/v1/users/1","statusCode":200,"duration":1}
 ```
+
+| `direction` | Written by | Means |
+|---|---|---|
+| `request.in` | the request-logging interceptor | a request arrived at this service |
+| `response.out` | the request-logging interceptor | this service answered it |
+| `request.out` | `@tw/http-connector` | this service called someone else |
+| `response.in` | `@tw/http-connector` | that call came back |
+
+**The noun comes first because the direction alone is ambiguous.** A response this service sends and
+a request this service makes are both, in plain English, "outgoing" — which is what the earlier
+`incoming`/`outgoing` pair meant to readers, and it was not what they meant in the code. Both of
+those described the *server* side of one request.
+
+All four are written at `info`. **The caller's pair is the half a trace cannot get anywhere else:**
+the callee's `request.in` exists only if the callee logs at all, so a call to a service that has not
+adopted `@tw/logger` — another team's, a sidecar's, a third party's — is recorded by the caller or
+not at all. It also carries the only client-observed `duration` in the system, which includes
+network time that the callee's in-process measurement cannot see.
+
+`verboseLogs` adds a second, detailed pair at `verbose` with masked headers and bodies. That is a
+debugging aid; the `info` pair is the record.
+
+Span reconstruction still builds edges from `caller` on the callee's `request.in` — the caller's
+pair is parsed and available but not yet used for pairing. Wiring it in is what would make edges
+exact rather than inferred, and it is the open item in `mcp/src/grafana/trace/spans.js`.
+
+> **Reading traces that straddle this rename.** `incoming` and `outgoing` were the previous
+> spellings of `request.in` and `response.out`. The parser accepts both and normalises to the new
+> pair, because Loki holds pre-rename lines for as long as retention allows and a trace spanning a
+> deploy contains a mix. A parser that understood only the new values would return half a trace.
 
 Three things follow, all worth knowing:
 
-- **`caller` is the forwarded `user-agent`.** That is the only edge information available — there is
-  no parent span id. A service whose outbound `User-Agent` disagrees with the name it logs under
-  produces edges that match no node, and its calls appear as orphaned roots. Each individual log
-  line still looks perfectly correct, which is what makes it hard to spot. Both values are read from
-  `DEPLOYMENT_NAME` in `app.module.ts` precisely so they cannot drift.
+- **`caller` is the forwarded `user-agent`** — the second half of the contract, arriving. That is
+  the only edge information available; there is no parent span id. A service whose outbound
+  `User-Agent` disagrees with the name it logs under produces edges that match no node, and its
+  calls appear as orphaned roots. Each individual log line still looks perfectly correct, which is
+  what makes it hard to spot. Both values are read from `DEPLOYMENT_NAME` in `app.module.ts`
+  precisely so they cannot drift. Requests from the page carry the browser's own UA and are
+  attributed to `browser` — see [The entry point](#the-entry-point--the-browser).
 - **`duration` is measured in-process**, so it is immune to clock skew between pods. It is not
   network time.
 - **The payload is a JSON document nested inside `message`.** Any consumer parses twice. That keeps
@@ -412,7 +651,9 @@ That single query *is* the distributed trace lookup.
 
 | To get | You do |
 |---|---|
+| A trace id on the very first hop | install the `fetch` interceptor once, in the host frontend |
 | A trace id on every inbound request | `TracingModule.forRoot()` — one import |
+| An edge from this service to the ones it calls | `HttpConnectionModule.forRoot({ userAgent: DEPLOYMENT_NAME })` — required, and it throws without it |
 | The id on every log line | inject `RequestScopedLoggerService` instead of `LoggerService` |
 | The id on every outbound call | inject `RequestScopedHttpConnectionService` |
 | Request/response logs that build the call graph | nothing — `LoggerModule.forRoot()` registers the interceptor |
@@ -466,6 +707,7 @@ That is the whole developer contract. **No** span creation, no context managers,
 | Application code | header + log field; nothing per-call | SDK, propagators, spans (auto-instrumentation reduces this) |
 | Per-call identity | **none** — one flat id for the whole request | span id + parent span id |
 | Parent/child edges | **inferred** from forwarded `user-agent` + timestamps | explicit and exact |
+| Browser → first service | one node, `browser` — the page cannot name itself in `user-agent` | the browser SDK emits a real root span |
 | Concurrent identical calls | ambiguous; flagged `ambiguous: true` | exact |
 | Sampling | none — every request is in the logs | usually sampled |
 | Timing fidelity | in-process `duration` per request | per-span, sub-operation granularity |
@@ -496,7 +738,7 @@ change one line of application code.
 | Piece | What it does |
 |---|---|
 | `trace/parse.js` | Loki lines → typed events. Three log shapes tolerated |
-| `trace/spans.js` | Pairs incoming/outgoing into spans; builds edges, the call tree, coverage |
+| `trace/spans.js` | Pairs `request.in`/`response.out` into spans; builds edges, the call tree, coverage |
 | `trace/render.js` | Mermaid sequence diagram + Markdown report |
 | `trace/index.js` | Orchestration, id extraction, LogQL construction, the compact summary |
 | `grafana_trace_id` | The MCP tool an agent calls |
@@ -504,7 +746,7 @@ change one line of application code.
 
 ### Being honest about the heuristics
 
-A flat id carries no span identity, so pairing an `incoming` with its `outgoing` is done per
+A flat id carries no span identity, so pairing a `request.in` with its `response.out` is done per
 `(service, method, path)` in timestamp order. That is exact for sequential calls and a best-effort
 guess when one caller hits the same endpoint concurrently.
 
@@ -567,15 +809,43 @@ framework-shaped answer:
    - **Go** — `context.Context` is the same idea with a different name.
    - **Python** — `contextvars`, plus a logging filter that injects the id.
    - **Java / Spring** — MDC with a servlet filter is the canonical form.
-   - **Frontend** — mint an id per HTTP call in your API client and set the header. A React app
-     needs one line in one wrapper.
-4. **An outbound client that re-attaches the header.** Wherever your services already share an HTTP
-   client, that is one line.
+   - **Frontend** — mint an id per HTTP call in your API client and set the header; see
+     [The entry point](#the-entry-point--the-browser) for the interceptor, the CORS requirements,
+     and why the browser can never supply the identity half.
+4. **An outbound client that re-attaches the header — and states who it is.** Wherever your services
+   already share an HTTP client, that is two lines, and the second one is the one people forget.
+   Make the identity a required constructor argument rather than an option with a default: a client
+   that can be built without one will be.
 
 The two halves that carry all the value — the header and the request/response log pair — are wire
 formats, not code. A service written in another language, by another team, joins the same traces the
 moment it forwards the header and logs the field. That is the practical argument for keeping the
 contract this small.
+
+### Adapting it — the parts that are ours, not yours
+
+Read the decisions above as the design and everything else as one worked example. Several choices
+here are ours because they suited our system, and they are the first things to re-examine rather
+than inherit:
+
+| Ours | Change it when |
+|---|---|
+| `user-agent` carries the caller identity | A mesh or gateway rewrites it, you need per-client attribution the UA cannot express, or you want the edge stated by the caller instead of inferred. Add a dedicated header, or log the caller's own outbound record — nothing else in the design depends on it being `user-agent` |
+| A ULID minted per HTTP call | Your debugging starts from something else — a session, a job, a UI action. The id is any non-empty string, so use the identifier your system already reasons about |
+| `x-trace-id` as the header name | It collides with something, or a platform you sit behind already propagates its own |
+| A `fetch` interceptor at the entry point | Your frontend uses a different client — see [The entry point](#the-entry-point--the-browser) |
+| Four `info` records per hop — two served, two called | Your log budget differs. The caller's pair is the one to drop first; it costs volume and buys visibility into services that do not log |
+
+**The reason this stays cheap is that it lives in libraries, not in services.** The header name, the
+id format and the log shape are each defined once. Changing one is a version bump and a rollout, not
+a search through a dozen repositories — and the rollout is mechanical: bump the dependency across
+every service, apply the config change, run the gates locally (tests, linters, a live run with a
+probe), push. That is a scripted job, not a project.
+
+That is the real argument for the three-package split, and it is worth stating plainly because the
+packages otherwise look like ceremony around ~120 lines of code: **the split is what makes a change
+to the contract a routine action instead of a migration.** A team that inlines the header name at
+each call site has the same system on day one and no way to change it on day two.
 
 ---
 

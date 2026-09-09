@@ -15,6 +15,25 @@
  * never called".
  */
 
+/**
+ * Canonical `direction` values, and the legacy spellings they replaced.
+ *
+ * `incoming`/`outgoing` described the server side of a request — a request arriving and the
+ * response going back — but read as though `outgoing` meant a call this service made. The
+ * replacements put the noun first so the two axes cannot be confused.
+ *
+ * **Both spellings stay readable indefinitely.** Loki holds lines written before the rename for as
+ * long as retention allows, and a trace that straddles a deploy contains both. A parser that
+ * understood only the new values would silently return half a trace, which is the failure this
+ * whole tool exists to avoid.
+ */
+const SERVER_DIRECTIONS = new Map([
+  ['request.in', 'request.in'],
+  ['response.out', 'response.out'],
+  ['incoming', 'request.in'],
+  ['outgoing', 'response.out'],
+]);
+
 /** Reads the container/service label off a Loki stream. */
 function serviceFromLabels(labels = {}) {
   return labels.container ?? labels.app ?? labels.pod ?? labels.job ?? undefined;
@@ -76,11 +95,13 @@ export function parseLine(line, labels = {}, timestamp) {
     payload = null;
   }
 
-  if (payload && typeof payload === 'object' && (payload.direction === 'incoming' || payload.direction === 'outgoing')) {
+  const direction = payload && typeof payload === 'object' ? SERVER_DIRECTIONS.get(payload.direction) : undefined;
+
+  if (direction) {
     return {
       ...base,
       kind: 'request',
-      direction: payload.direction,
+      direction,
       method: payload.method,
       path: payload.path ?? stripQuery(payload.url),
       statusCode: payload.statusCode,

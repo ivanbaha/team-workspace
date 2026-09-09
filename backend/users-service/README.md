@@ -89,6 +89,6 @@ Copy `.env.example` to `.env` for local overrides.
 | JWT_SECRET               | changeme        | Secret for signing JWTs                              |
 | DEPLOYMENT_NAME          | `package.json` name | Name logged as `serviceName`. **Must equal the container name** |
 | POD_NAME                 | —               | From the Kubernetes downward API                     |
-| LOGGER_LEVEL             | info            | `error`…`silly`                                      |
+| LOGGER_LEVEL             | info            | `error`…`verbose`                                      |
 | LOGGER_FORMAT            | json            | `pretty` for local terminals only                    |
 | LOGGER_REQUEST_LOGGING   | follows level   | `off`, `compact`, `full`                             |

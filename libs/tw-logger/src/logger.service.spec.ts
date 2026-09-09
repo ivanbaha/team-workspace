@@ -89,7 +89,7 @@ describe('LoggerService', () => {
 
   it('reports silly as its own display level while filtering at verbose priority', () => {
     const verbose = LoggerService.createStandalone(BASE_CONFIG);
-    expect(JSON.parse(captureStdout(() => verbose.silly('x', 'Ctx'))).level).toBe('silly');
+    expect(JSON.parse(captureStdout(() => verbose.silly('x', 'Ctx'))).level).toBe('verbose');
 
     const info = LoggerService.createStandalone({ ...BASE_CONFIG, level: 'info' });
     expect(captureStdout(() => info.silly('x', 'Ctx'))).toBe('');

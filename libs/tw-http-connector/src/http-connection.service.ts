@@ -1,7 +1,7 @@
 import { HttpException, Inject, Injectable } from '@nestjs/common';
 import { maskBodyForLog, maskHeadersForLog, maskUrlForLog } from '@tw/logger';
 import { TRACE_ID_HEADER } from '@tw/tracing';
-import { HC_LOGGER } from './constants';
+import { HC_LOGGER, USER_AGENT_HEADER, USER_AGENT_HEADER_WIRE_CASE } from './constants';
 import { errorToString } from './utils';
 
 import type { ITraceLogger } from '@tw/logger';
@@ -55,46 +55,88 @@ export class HttpConnectionService {
       signal: AbortSignal.timeout(timeout ?? this.options.timeout),
     };
 
+    const logContext = `${method} ${maskUrlForLog(requestUrl)}`;
+
+    // The compact record, always. This is the caller's own statement that the call happened, and it
+    // is the half a trace cannot reconstruct from anywhere else: the callee's record exists only if
+    // the callee logs at all. Two lines per outbound call is the price of that.
+    this.logger.info(
+      JSON.stringify({ direction: 'request.out', method, url: maskUrlForLog(requestUrl) }),
+      logContext,
+      traceId,
+    );
+
     if (this.options.verboseLogs) {
-      this.logger.silly(
+      this.logger.verbose(
         JSON.stringify({
-          direction: 'request',
+          direction: 'request.out',
           url: maskUrlForLog(requestUrl),
           method,
           headers: maskHeadersForLog(headers),
-          ...(body !== undefined ? { body: maskBodyForLog(body) } : {}),
+          // Mask `rest.data`, not `body`. `body` is already JSON-serialised, and maskBodyForLog
+          // masks either an object's sensitive keys or a URL-encoded string — a JSON string matches
+          // neither, so passing it through logged passwords and tokens verbatim.
+          ...(body !== undefined ? { body: maskBodyForLog(rest.data ?? body) } : {}),
         }),
-        'HttpConnectionService.connect',
+        logContext,
         traceId,
       );
     }
 
+    const startTime = Date.now();
     let response: Response;
     try {
       response = await this.fetchWithRetry(requestUrl, init, traceId);
     } catch (error) {
+      // The response half is emitted even on a transport failure — a request with no matching
+      // response is what an unterminated span looks like, and that is usually the finding.
+      this.logger.info(
+        JSON.stringify({
+          direction: 'response.in',
+          method,
+          url: maskUrlForLog(requestUrl),
+          statusCode: 504,
+          duration: Date.now() - startTime,
+        }),
+        logContext,
+        traceId,
+      );
       this.logger.error(
         `Request to ${maskUrlForLog(requestUrl)} failed: ${errorToString(error)}`,
         error instanceof Error ? error.stack : undefined,
-        'HttpConnectionService.connect',
+        logContext,
         traceId,
       );
       // 504: the upstream never answered. Distinguishable from an upstream that answered with 500.
       throw new HttpException(`Upstream request failed: ${errorToString(error)}`, 504);
     }
 
+    // Measured before body parsing, so it is time spent on the call rather than on deserialising it.
+    const duration = Date.now() - startTime;
     const data = await this.parseResponseBody(response, responseType);
 
+    this.logger.info(
+      JSON.stringify({
+        direction: 'response.in',
+        method,
+        url: maskUrlForLog(requestUrl),
+        statusCode: response.status,
+        duration,
+      }),
+      logContext,
+      traceId,
+    );
+
     if (this.options.verboseLogs) {
-      this.logger.silly(
+      this.logger.verbose(
         JSON.stringify({
-          direction: 'response',
+          direction: 'response.in',
           url: maskUrlForLog(requestUrl),
           status: response.status,
           statusText: response.statusText,
           contentType: response.headers.get('content-type'),
         }),
-        'HttpConnectionService.connect',
+        logContext,
         traceId,
       );
     }
@@ -120,10 +162,16 @@ export class HttpConnectionService {
   /**
    * Assembles the outgoing headers.
    *
-   * Two of these lines are the entire outbound half of the tracing system: the trace id is written
-   * last so it always wins, and every other casing variant is deleted first so exactly one
-   * `x-trace-id` reaches the wire. A request carrying both `X-Trace-Id` and `x-trace-id` is a
-   * request whose downstream service picks one at random.
+   * Six of these lines are the entire outbound half of the tracing system, and they are two
+   * applications of one rule: **the contract headers are written last, and every other casing
+   * variant of them is deleted first**, so exactly one `user-agent` and exactly one `x-trace-id`
+   * reach the wire. A request carrying both `X-Trace-Id` and `x-trace-id` is a request whose
+   * downstream service picks one at random; a request carrying two `User-Agent` variants loses its
+   * edge in exactly the same way, and neither failure shows up in a log line.
+   *
+   * Both therefore outrank whatever the caller put in `headers`. That is the same reasoning that
+   * keeps the trace id out of `forwardHeaders`: nothing a call site passes ad hoc should be able to
+   * switch off correlation for that call.
    */
   private buildHeaders(
     incoming: Record<string, string> | undefined,
@@ -132,19 +180,14 @@ export class HttpConnectionService {
     method: string,
     data: unknown,
   ): Record<string, string> {
-    const headers: Record<string, string> = {
-      // Sent on every call. Without it the receiving service records `caller: "node"` and the edge
-      // it would have contributed to the trace is lost.
-      'User-Agent': userAgent ?? this.options.userAgent,
-      ...incoming,
-    };
+    const headers: Record<string, string> = { ...incoming };
 
-    if (traceId) {
-      for (const key of Object.keys(headers)) {
-        if (key.toLowerCase() === TRACE_ID_HEADER) delete headers[key];
-      }
-      headers[TRACE_ID_HEADER] = traceId;
-    }
+    // Sent on every call, no exceptions. Without it the receiving service records `caller: "node"`
+    // and the edge this call would have contributed to the trace is lost. A per-call `userAgent`
+    // is the one deliberate override — see ConnectOptions.userAgent.
+    this.setContractHeader(headers, USER_AGENT_HEADER, userAgent ?? this.options.userAgent, USER_AGENT_HEADER_WIRE_CASE);
+
+    if (traceId) this.setContractHeader(headers, TRACE_ID_HEADER, traceId);
 
     if (METHODS_WITH_BODY.includes(method)) {
       if (!this.getHeader(headers, 'content-type')) headers['Content-Type'] = 'application/json';
@@ -155,6 +198,26 @@ export class HttpConnectionService {
     }
 
     return headers;
+  }
+
+  /**
+   * Writes one of the two tracing contract headers, removing every casing variant already present.
+   *
+   * Delete-then-write rather than overwrite, because `{ 'User-Agent': a, 'user-agent': b }` is two
+   * distinct keys in a plain object and only becomes one header at the `fetch` boundary — where it
+   * is *combined* into `a, b` rather than resolved. That is a value no receiver reads as an
+   * identity, and nothing upstream of the wire would have shown it.
+   */
+  private setContractHeader(
+    headers: Record<string, string>,
+    name: string,
+    value: string,
+    wireCase: string = name,
+  ): void {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === name) delete headers[key];
+    }
+    headers[wireCase] = value;
   }
 
   private buildBody(method: string, data: unknown): string | undefined {

@@ -89,6 +89,84 @@ describe('HttpConnectionService', () => {
     expect(sentHeaders()['User-Agent']).toBe('orders-service');
   });
 
+  it('sends exactly one User-Agent when the caller supplied one in headers', async () => {
+    const service = new HttpConnectionService(makeOptions(), makeLogger());
+
+    // Two distinct object keys that are one header on the wire, where `fetch` would combine them
+    // into `orders-service, curl/8.4.0` — a value no receiving service reads as an identity.
+    await service.connect({
+      url: 'https://users/v1/users/1',
+      method: 'GET',
+      headers: { 'user-agent': 'curl/8.4.0', 'User-Agent': 'something-else' },
+    });
+
+    const headers = sentHeaders();
+    const variants = Object.keys(headers).filter((key) => key.toLowerCase() === 'user-agent');
+    expect(variants).toEqual(['User-Agent']);
+    expect(headers['User-Agent']).toBe('orders-service');
+  });
+
+  it('lets a per-call userAgent override win, since it is the one deliberate escape hatch', async () => {
+    const service = new HttpConnectionService(makeOptions(), makeLogger());
+
+    await service.connect({ url: 'https://third-party/v1/thing', method: 'GET', userAgent: 'orders-service/partner' });
+
+    expect(sentHeaders()['User-Agent']).toBe('orders-service/partner');
+  });
+
+  describe('the outbound call record', () => {
+    /** Request-log payloads written at `info`, in order. */
+    const infoPayloads = (logger: ITraceLogger) =>
+      (logger.info as jest.Mock).mock.calls.map((call) => JSON.parse(call[0] as string));
+
+    it('states the call at info, both halves, without verbose logging enabled', async () => {
+      const logger = makeLogger();
+      await new HttpConnectionService(makeOptions(), logger).connect({
+        url: 'https://users/v1/users/1',
+        method: 'GET',
+        traceId: 'TRACE1',
+      });
+
+      const [out, back] = infoPayloads(logger);
+      expect(out).toEqual({ direction: 'request.out', method: 'GET', url: 'https://users/v1/users/1' });
+      expect(back).toMatchObject({ direction: 'response.in', method: 'GET', statusCode: 200 });
+      expect(typeof back.duration).toBe('number');
+      // The trace id goes on both, or the two lines cannot be tied to the request that caused them.
+      expect((logger.info as jest.Mock).mock.calls.every((call) => call[2] === 'TRACE1')).toBe(true);
+    });
+
+    it('still records the response half when the transport fails', async () => {
+      fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+      const logger = makeLogger();
+
+      await expect(
+        new HttpConnectionService(makeOptions(), logger).connect({ url: 'https://users/v1/users/1', method: 'GET' }),
+      ).rejects.toMatchObject({ status: 504 });
+
+      // A request.out with no response.in is an unterminated span — reserve that for calls that
+      // genuinely never came back, not for ones that failed in a way we saw.
+      expect(infoPayloads(logger).map((payload) => payload.direction)).toEqual(['request.out', 'response.in']);
+      expect(infoPayloads(logger)[1]).toMatchObject({ statusCode: 504 });
+    });
+
+    it('keeps headers and bodies out of the info pair, and in the verbose one', async () => {
+      const logger = makeLogger();
+      await new HttpConnectionService(makeOptions({ verboseLogs: true }), logger).connect({
+        url: 'https://users/v1/login',
+        method: 'POST',
+        data: { password: 'hunter2000' },
+      });
+
+      expect(infoPayloads(logger).every((payload) => !('headers' in payload) && !('body' in payload))).toBe(true);
+
+      const detailed = JSON.parse((logger.verbose as jest.Mock).mock.calls[0][0] as string);
+      expect(detailed.headers['User-Agent']).toBe('orders-service');
+      // The body is masked as structured data. Masking the serialised string instead silently did
+      // nothing — a JSON string is neither an object with sensitive keys nor URL-encoded.
+      expect(detailed.body).toEqual({ password: 'hu**...**00' });
+    });
+  });
+
   it('surfaces an upstream failure with the upstream status, not a 500', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ message: 'not found' }, 404));
     const service = new HttpConnectionService(makeOptions(), makeLogger());

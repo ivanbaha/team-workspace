@@ -1,7 +1,7 @@
 /**
  * Assembles request events into spans and caller → callee edges.
  *
- * A flat trace id carries no span identity, so pairing an `incoming` with its `outgoing` is done per
+ * A flat trace id carries no span identity, so pairing a `request.in` with its `response.out` is done per
  * `(service, method, path)` in timestamp order. That is exact for sequential calls and a
  * best-effort guess when one caller hits the same endpoint concurrently.
  *
@@ -27,7 +27,8 @@ const resolveAlias = (name) => (name && CALLER_ALIASES.get(name)) || name;
 const spanKey = (event) => `${event.service}|${event.method}|${event.path}`;
 
 /**
- * Pairs incoming and outgoing request records into spans.
+ * Pairs `request.in` and `response.out` records into spans. Legacy `incoming`/`outgoing` lines
+ * arrive here already normalised by `parse.js`, so only the canonical pair is handled below.
  *
  * @param {object[]} events - Parsed events, in timestamp order.
  * @returns {object[]} Spans, ordered by start time.
@@ -40,7 +41,7 @@ export function buildSpans(events) {
     if (event.kind !== 'request') continue;
     const key = spanKey(event);
 
-    if (event.direction === 'incoming') {
+    if (event.direction === 'request.in') {
       const span = {
         service: event.service,
         podId: event.podId,
@@ -66,7 +67,7 @@ export function buildSpans(events) {
     const queue = pending.get(key);
     const span = queue?.shift();
     if (!span) {
-      // An outgoing with no incoming: the window clipped the start, or logging was enabled
+      // A response.out with no request.in: the window clipped the start, or logging was enabled
       // mid-request. Keep it as a span of its own rather than discarding the status code.
       spans.push({
         service: event.service,

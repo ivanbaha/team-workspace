@@ -89,9 +89,13 @@ export class LoggerService extends ConsoleLogger implements ITraceLogger {
     this.writeLog('verbose', 'verbose', message, context, traceId);
   }
 
-  /** Displays as `silly` but filters at `verbose` priority — the level request bodies land on. */
+  /**
+   * @deprecated Use {@link verbose}. `silly` was only ever a display label — it always filtered at
+   *   `verbose` priority, so this is the same level under a name npm popularised and nothing else
+   *   uses. Kept so an existing caller does not break; it now writes `level: "verbose"`.
+   */
   silly(message: string, context?: string, traceId?: string): void {
-    this.writeLog('verbose', 'silly', message, context, traceId);
+    this.writeLog('verbose', 'verbose', message, context, traceId);
   }
 
   /*************************************************************************

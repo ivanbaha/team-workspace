@@ -57,7 +57,7 @@ own uncertainty and you must not read past those flags:
   the service was uninvolved; it usually means it has not adopted `@tw/logger`, is running below
   `info` level, or is not ours. **Never conclude a service was skipped from its absence in `spans`.**
 - `ambiguous: true` / `paired: false` — another request was open on the same endpoint, so the
-  incoming/outgoing pairing is a guess. Read this as "do not trust the elapsed time", **not** as
+  `request.in`/`response.out` pairing is a guess. Read this as "do not trust the elapsed time", **not** as
   "the call did not happen".
 - `unterminated: true` — a request never produced a response: a crash, a timeout, or a request still
   in flight. This is frequently the finding, not noise.

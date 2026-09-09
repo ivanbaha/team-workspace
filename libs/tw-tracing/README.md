@@ -67,7 +67,7 @@ guards and interceptors. Two things depend on that:
 - `@tw/logger` registers its request-logging interceptor through `APP_INTERCEPTOR`, and NestJS
   pushes those onto the global interceptor list during `NestFactory.create()` — *before* anything
   added afterwards by `app.useGlobalInterceptors()`. A seed registered as a global interceptor
-  therefore runs **second**, and the incoming/outgoing pair for a request that arrived without an id
+  therefore runs **second**, and the request.in/response.out pair for a request that arrived without an id
   would be logged without one. That request is the first hop of every trace.
 - **Guards run before interceptors at all.** A request rejected by an auth guard never reaches an
   interceptor, so an interceptor-based seed leaves every 401 and 403 untraceable.

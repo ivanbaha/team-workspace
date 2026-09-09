@@ -55,13 +55,13 @@ trace id in that file — the connector reads it off the inbound request and att
 the outbound call, so both services log under the same id:
 
 ```txt
-products-service  GET /v1/products     direction=incoming  caller=curl/8.7.1
+products-service  GET /v1/products     direction=request.in  caller=curl/8.7.1
 products-service  ProductsService.findAll   Returning 3 product(s)
-users-service     GET /v1/users/1      direction=incoming  caller=products-service
-users-service     GET /v1/users/1      direction=outgoing  statusCode=200  duration=1
-users-service     GET /v1/users/2      direction=incoming  caller=products-service
-users-service     GET /v1/users/2      direction=outgoing  statusCode=200  duration=0
-products-service  GET /v1/products     direction=outgoing  statusCode=200  duration=23
+users-service     GET /v1/users/1      direction=request.in  caller=products-service
+users-service     GET /v1/users/1      direction=response.out  statusCode=200  duration=1
+users-service     GET /v1/users/2      direction=request.in  caller=products-service
+users-service     GET /v1/users/2      direction=response.out  statusCode=200  duration=0
+products-service  GET /v1/products     direction=response.out  statusCode=200  duration=23
 ```
 
 `caller=products-service` is what creates the edge, and it comes from the `User-Agent` the connector
@@ -91,6 +91,6 @@ yarn dev:products-be  # starts on port 4002 with nodemon + ts-node
 | USERS_SERVICE_URL      | http://localhost:4001 | Upstream users-service                            |
 | DEPLOYMENT_NAME        | `package.json` name   | `serviceName` **and** outbound `User-Agent`       |
 | POD_NAME               | —                     | From the Kubernetes downward API                  |
-| LOGGER_LEVEL           | info                  | `silly` also logs every outbound request/response |
+| LOGGER_LEVEL           | info                  | `verbose` adds masked headers and bodies to the request/response records |
 | LOGGER_FORMAT          | json                  | `pretty` for local terminals only                 |
 | LOGGER_REQUEST_LOGGING | follows level         | `off`, `compact`, `full`                          |

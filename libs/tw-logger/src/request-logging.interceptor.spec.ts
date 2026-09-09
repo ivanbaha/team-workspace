@@ -27,7 +27,7 @@ const nextOk = (body: unknown = { ok: true }): CallHandler => ({ handle: () => o
 const payloadOf = (call: unknown[]) => JSON.parse(call[0] as string);
 
 describe('RequestLoggingInterceptor', () => {
-  it('emits the incoming/outgoing pair a trace is reconstructed from', (done) => {
+  it('emits the request.in/response.out pair a trace is reconstructed from', (done) => {
     const logger = makeLogger();
     const interceptor = new RequestLoggingInterceptor(logger, undefined, 'compact');
     const req = {
@@ -40,13 +40,13 @@ describe('RequestLoggingInterceptor', () => {
       const [incoming, outgoing] = (logger.info as jest.Mock).mock.calls;
 
       expect(payloadOf(incoming)).toEqual({
-        direction: 'incoming',
+        direction: 'request.in',
         method: 'GET',
         path: '/v1/users/1',
         caller: 'products-service',
       });
       expect(payloadOf(outgoing)).toMatchObject({
-        direction: 'outgoing',
+        direction: 'response.out',
         method: 'GET',
         path: '/v1/users/1',
         statusCode: 200,
@@ -58,7 +58,7 @@ describe('RequestLoggingInterceptor', () => {
     });
   });
 
-  it('still logs the outgoing half when the request fails, with the status off the exception', (done) => {
+  it('still logs the response.out half when the request fails, with the status off the exception', (done) => {
     const logger = makeLogger();
     const interceptor = new RequestLoggingInterceptor(logger, undefined, 'compact');
     const req = { method: 'GET', url: '/v1/users/9', headers: { 'x-trace-id': 'TRACE1' } };
@@ -68,13 +68,13 @@ describe('RequestLoggingInterceptor', () => {
       error: () => {
         const outgoing = (logger.info as jest.Mock).mock.calls[1];
         // res.statusCode is still 200 here — the filter has not written the response yet.
-        expect(payloadOf(outgoing)).toMatchObject({ direction: 'outgoing', statusCode: 404 });
+        expect(payloadOf(outgoing)).toMatchObject({ direction: 'response.out', statusCode: 404 });
         done();
       },
     });
   });
 
-  it('records a duration on the outgoing half', (done) => {
+  it('records a duration on the response.out half', (done) => {
     const logger = makeLogger();
     const interceptor = new RequestLoggingInterceptor(logger, undefined, 'compact');
     const req = { method: 'GET', url: '/v1/users', headers: {} };
@@ -96,7 +96,7 @@ describe('RequestLoggingInterceptor', () => {
     });
   });
 
-  it('logs at silly with masked headers and bodies in full mode', (done) => {
+  it('logs at verbose with masked headers and bodies in full mode', (done) => {
     const logger = makeLogger();
     const interceptor = new RequestLoggingInterceptor(logger, undefined, 'full');
     const req = {
@@ -109,7 +109,7 @@ describe('RequestLoggingInterceptor', () => {
     interceptor.intercept(makeContext(req, { statusCode: 200, getHeaders: () => ({}) }), nextOk()).subscribe(() => {
       expect(logger.info).not.toHaveBeenCalled();
 
-      const payload = payloadOf((logger.silly as jest.Mock).mock.calls[0]);
+      const payload = payloadOf((logger.verbose as jest.Mock).mock.calls[0]);
       expect(payload.headers.authorization).toBe('Bearer ab**...**kl');
       expect(payload.body.password).toBe('hu**...**00');
       done();
@@ -122,7 +122,7 @@ describe('RequestLoggingInterceptor', () => {
 
     interceptor.intercept(makeContext({ method: 'GET', url: '/v1/users', headers: {} }), nextOk()).subscribe(() => {
       expect(logger.info).not.toHaveBeenCalled();
-      expect(logger.silly).not.toHaveBeenCalled();
+      expect(logger.verbose).not.toHaveBeenCalled();
       done();
     });
   });

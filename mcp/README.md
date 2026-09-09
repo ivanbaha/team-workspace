@@ -248,7 +248,7 @@ src/
 │   ├── trace-tool.js # grafana_trace_id — cross-environment search + report writing
 │   └── trace/        # Trace reconstruction engine, shared with the .ai connector
 │       ├── parse.js  #   Loki lines → typed events (three log shapes tolerated)
-│       ├── spans.js  #   Pairs incoming/outgoing; builds edges, the call tree, coverage
+│       ├── spans.js  #   Pairs request.in/response.out; builds edges, the call tree, coverage
 │       ├── render.js #   Mermaid sequence diagram + Markdown report
 │       └── index.js  #   Orchestration, id extraction, LogQL construction, summary
 ├── mongodb/

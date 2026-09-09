@@ -1,4 +1,4 @@
-import { TRACE_ID_HEADER } from './constants';
+import { MAX_TRACE_ID_LENGTH, TRACE_ID_HEADER } from './constants';
 import { deriveTraceId, ensureTraceId, getTraceId, newTraceId } from './trace-id';
 import { traceIdMiddleware } from './trace-id.middleware';
 
@@ -47,6 +47,45 @@ describe('getTraceId', () => {
 });
 
 describe('ensureTraceId', () => {
+  // An id we minted is never near the cap: a ULID is 26 characters and a derived id is under 50.
+  // The cap exists for the one id nobody here minted — the one an outside caller sent us.
+  describe('the inbound length cap', () => {
+    it('leaves a normal id untouched', () => {
+      const parent = newTraceId();
+      const derived = deriveTraceId(parent, 'page', 3, 'chunk', 2);
+
+      expect(derived.length).toBeLessThan(MAX_TRACE_ID_LENGTH);
+      expect(ensureTraceId({ headers: { [TRACE_ID_HEADER]: derived } })).toBe(derived);
+    });
+
+    it('truncates an oversized inbound id, on the request as well as in the return value', () => {
+      const req = { headers: { [TRACE_ID_HEADER]: 'A'.repeat(3000) } };
+
+      const traceId = ensureTraceId(req);
+
+      expect(traceId).toHaveLength(MAX_TRACE_ID_LENGTH);
+      // Everything downstream reads the headers object, not the return value.
+      expect(req.headers[TRACE_ID_HEADER]).toBe(traceId);
+    });
+
+    it('leaves no over-length variant behind for a downstream reader to find', () => {
+      const req: { headers: Record<string, unknown> } = { headers: { 'X-Trace-Id': 'A'.repeat(3000) } };
+
+      ensureTraceId(req);
+
+      expect(Object.keys(req.headers)).toEqual([TRACE_ID_HEADER]);
+      expect(getTraceId(req)).toHaveLength(MAX_TRACE_ID_LENGTH);
+    });
+
+    it('is idempotent, so every hop of one chain agrees on the id', () => {
+      const first = { headers: { [TRACE_ID_HEADER]: 'A'.repeat(3000) } };
+      const atEdge = ensureTraceId(first);
+
+      // The next service inherits what the edge forwarded, and must not shorten it again.
+      expect(ensureTraceId({ headers: { [TRACE_ID_HEADER]: atEdge } })).toBe(atEdge);
+    });
+  });
+
   it('inherits an id that is already on the request', () => {
     const req = { headers: { [TRACE_ID_HEADER]: 'inherited' } };
 

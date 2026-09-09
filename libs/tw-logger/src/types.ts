@@ -13,5 +13,6 @@ export interface ITraceLogger {
   error(message: string, trace?: string, context?: string, traceId?: string): void;
   debug(message: string, context?: string, traceId?: string): void;
   verbose(message: string, context?: string, traceId?: string): void;
+  /** @deprecated Use {@link ITraceLogger.verbose}. Same level; `silly` was only a display label. */
   silly(message: string, context?: string, traceId?: string): void;
 }

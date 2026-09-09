@@ -51,7 +51,8 @@ function resolveServiceName(env: NodeJS.ProcessEnv): string {
 
 function resolveLevel(raw?: string): LoggerLevel {
   if (raw && VALID_LEVELS.includes(raw as LoggerLevelInput)) {
-    // `silly` is a display level, not a priority level — it filters as verbose.
+    // `silly` is a deprecated alias, kept so a deployment already setting it keeps working.
+    // It was never a priority level of its own — it has always filtered as `verbose`.
     return raw === 'silly' ? 'verbose' : (raw as LoggerLevel);
   }
   return 'info';

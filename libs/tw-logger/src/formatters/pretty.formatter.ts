@@ -7,7 +7,6 @@ const COLORS = {
   info: '\x1b[32m',
   debug: '\x1b[34m',
   verbose: '\x1b[35m',
-  silly: '\x1b[35m',
   reset: '\x1b[0m',
   bold: '\x1b[1m',
 };

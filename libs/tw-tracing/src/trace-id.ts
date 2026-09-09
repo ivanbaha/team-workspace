@@ -1,5 +1,5 @@
 import { ulid } from 'ulidx';
-import { TRACE_ID_HEADER, TRACE_ID_SEGMENT_SEPARATOR } from './constants';
+import { MAX_TRACE_ID_LENGTH, TRACE_ID_HEADER, TRACE_ID_SEGMENT_SEPARATOR } from './constants';
 
 /** The minimal shape this package needs from an inbound request. Framework-agnostic on purpose. */
 export interface RequestLike {
@@ -75,15 +75,35 @@ export function getTraceId(req?: RequestLike): string | undefined {
  * Inheriting an existing id rather than overwriting it is what makes the trace *distributed* — the
  * first service to see a request creates the id, every service after it adopts one.
  *
+ * An inherited id is **truncated to {@link MAX_TRACE_ID_LENGTH}**, and that is the only thing done
+ * to it. The value arrives from outside — for an edge service, straight from a browser — and it is
+ * then copied onto every log line of every service in the chain, so its length is multiplied by the
+ * whole request fan-out. Truncation is deliberately all there is: the format stays open because
+ * `deriveTraceId` produces legitimate ids nobody can predict, and header values cannot carry
+ * control characters in the first place — Node's HTTP parser rejects those before this is reached.
+ *
+ * Truncation is idempotent and the cap is the same everywhere, so a long id is shortened once at
+ * the first hop and every service after it inherits the identical value. A cap that varied between
+ * services would split one trace into two.
+ *
  * @param req - The inbound request. Its `headers` object is created if missing.
+ * @param maxLength - Override the cap. Defaults to {@link MAX_TRACE_ID_LENGTH}.
  * @returns The trace id now on the request — inherited if one was present, freshly minted otherwise.
  */
-export function ensureTraceId(req: RequestLike): string {
+export function ensureTraceId(req: RequestLike, maxLength: number = MAX_TRACE_ID_LENGTH): string {
   const existing = getTraceId(req);
-  if (existing) return existing;
+  // The common path by far: an id we or another of our services minted. Nothing to do.
+  if (existing !== undefined && existing.length <= maxLength) return existing;
 
-  const traceId = newTraceId();
+  const traceId = existing === undefined ? newTraceId() : existing.slice(0, maxLength);
   if (!req.headers) req.headers = {};
+
+  // Remove every casing variant before writing, so nothing downstream can read back the original
+  // over-length value from an `X-Trace-Id` the sender used instead.
+  for (const key of Object.keys(req.headers)) {
+    if (key.toLowerCase() === TRACE_ID_HEADER) delete req.headers[key];
+  }
+
   req.headers[TRACE_ID_HEADER] = traceId;
   return traceId;
 }

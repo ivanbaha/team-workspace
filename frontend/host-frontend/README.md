@@ -10,6 +10,28 @@ The main React application. Responsible for the application shell: global naviga
 - Top-level routing that delegates sub-routes to microfrontends
 - Shared authentication context provided to all microfrontends
 - Module Federation host configuration
+- **The `fetch` trace interceptor** — installed once here, before any remote is mounted
+
+---
+
+## The trace interceptor
+
+The host owns the first hop of every distributed trace. `installTraceInterceptor()` wraps
+`window.fetch` so each call to our own APIs carries a freshly minted ULID in `x-trace-id`; the
+services inherit it, and the whole request chain lands in the logs under one id.
+
+```ts
+// src/index.jsx — before mounting any remote
+installTraceInterceptor([import.meta.env.VITE_API_ORIGIN]);
+```
+
+**It belongs here and nowhere else.** Remotes share this `window`, so a remote that installs its own
+stacks a second patch on top of the host's — three wrappers deep, with a load-order dependency
+nobody wants to debug. Remotes just call `fetch` and get the header for free.
+
+Implementation, the CORS headers it needs cross-origin, and why the browser can never supply the
+identity half of the contract:
+[The entry point — the browser](../../docs/architecture/distributed-tracing.md#the-entry-point--the-browser).
 
 ---
 

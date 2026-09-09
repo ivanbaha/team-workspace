@@ -1,6 +1,6 @@
 export type LoggerLevel = 'error' | 'warn' | 'info' | 'debug' | 'verbose';
 
-/** What may be set in `LOGGER_LEVEL`. `silly` is accepted and collapses onto `verbose` internally. */
+/** What may be set in `LOGGER_LEVEL`. `silly` is a deprecated alias for `verbose` and still accepted. */
 export type LoggerLevelInput = LoggerLevel | 'silly';
 
 export type LoggerFormat = 'json' | 'pretty';
@@ -12,7 +12,7 @@ export type LoggerFormat = 'json' | 'pretty';
  *   edges and per-call durations are gone, because those come only from the request-log pair.
  * - `compact` — one `info` line per direction carrying just what a trace needs: method, path,
  *   caller, status code, duration. No headers, no bodies.
- * - `full` — the `silly` payload: masked headers and bodies as well.
+ * - `full` — the `verbose` payload: masked headers and bodies as well.
  */
 export type RequestLoggingMode = 'off' | 'compact' | 'full';
 

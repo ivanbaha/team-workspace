@@ -70,7 +70,7 @@ export class RequestScopedLoggerService implements ITraceLogger {
   }
 
   silly(message: string, context?: string): void {
-    this.logger.silly(message, context, this.traceId);
+    this.logger.verbose(message, context, this.traceId);
   }
 
   /**

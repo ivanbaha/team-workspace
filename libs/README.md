@@ -44,7 +44,7 @@ every individual log line still looks correct.
 |---|---|
 | [@tw/tracing](./tw-tracing/README.md) | The wire contract, and why the seed is middleware rather than an interceptor |
 | [@tw/logger](./tw-logger/README.md) | The log record, the two loggers, and the request/response pair traces are built from |
-| [@tw/http-connector](./tw-http-connector/README.md) | Outbound propagation, and why `userAgent` must equal `DEPLOYMENT_NAME` |
+| [@tw/http-connector](./tw-http-connector/README.md) | Outbound propagation, and why `userAgent` must equal `DEPLOYMENT_NAME` — it is required, and `forRoot()` throws without it |
 
 ```bash
 yarn build:libs   # tracing → logger → http-connector, in dependency order

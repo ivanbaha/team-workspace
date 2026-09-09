@@ -107,12 +107,27 @@ and fails silently, by design — see the notes on `@Optional()` in
 `LoggerModule.forRoot()` registers an interceptor that emits one pair per request:
 
 ```json
-{"direction":"incoming","method":"GET","path":"/v1/users/1","caller":"products-service"}
-{"direction":"outgoing","method":"GET","path":"/v1/users/1","statusCode":200,"duration":124}
+{"direction":"request.in","method":"GET","path":"/v1/users/1","caller":"products-service"}
+{"direction":"response.out","method":"GET","path":"/v1/users/1","statusCode":200,"duration":124}
 ```
 
 This pair, not the trace id, is what makes a chain reconstructable. The id groups lines; these two
 records supply the edges, the status codes and the timings.
+
+| `direction` | Written by | Means |
+|---|---|---|
+| `request.in` | the request-logging interceptor | a request arrived at this service |
+| `response.out` | the request-logging interceptor | this service answered it |
+| `request.out` | `@tw/http-connector` | this service called someone else |
+| `response.in` | `@tw/http-connector` | that call came back |
+
+**The noun comes first because the direction alone is ambiguous.** A response this service sends and
+a request this service makes are both, in plain English, "outgoing" — which is what the earlier
+`incoming`/`outgoing` pair meant to readers, and it was not what they meant in the code. Both of
+those described the *server* side of one request.
+
+`incoming` and `outgoing` were the previous spellings of the first two. The trace tooling still
+reads them, so lines written before the rename stay searchable for their whole retention.
 
 - **`caller` is the forwarded `user-agent`** — the only edge information that exists, since there
   are no parent span ids. A service whose `User-Agent` disagrees with the name it logs under shows
@@ -127,7 +142,7 @@ records supply the edges, the status codes and the timings.
 | `LOGGER_REQUEST_LOGGING` | What is logged |
 |---|---|
 | `compact` (default) | `info`: direction, method, path, caller, status, duration |
-| `full` | `silly`: the above plus masked headers and bodies |
+| `full` | `verbose`: the above plus masked headers and bodies |
 | `off` | nothing — traces lose their edges and durations |
 
 The default is deliberate: tracing has to work in every environment with no configuration, because a
@@ -143,7 +158,7 @@ All from the environment; read once at construction.
 |---|---|---|
 | `DEPLOYMENT_NAME` | `package.json` name | **Must equal the container name.** Traces attribute by it |
 | `POD_NAME` | — | Kubernetes downward API. The service prefix is stripped |
-| `LOGGER_LEVEL` | `info` | `error`, `warn`, `info`, `debug`, `verbose`, `silly` |
+| `LOGGER_LEVEL` | `info` | `error`, `warn`, `info`, `debug`, `verbose` (`silly` is a deprecated alias for `verbose`) |
 | `LOGGER_FORMAT` | `json` | `pretty` for local development only — pretty output is not parseable |
 | `LOGGER_REQUEST_LOGGING` | follows level | `off`, `compact`, `full` |
 

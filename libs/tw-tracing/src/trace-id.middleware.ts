@@ -31,7 +31,7 @@ export interface TraceIdMiddlewareOptions {
  * - The request-logging interceptor in `@tw/logger` is registered through `APP_INTERCEPTOR`, which
  *   NestJS pushes onto the global interceptor list during `NestFactory.create()` — *before* anything
  *   added later by `app.useGlobalInterceptors()`. An interceptor-based seed therefore runs second,
- *   and the incoming/outgoing pair for a request that arrived without an id would be logged without
+ *   and the request.in/response.out pair for a request that arrived without an id would be logged without
  *   one. That is exactly the first hop of every trace.
  * - Guards run before interceptors at all. A request rejected by an auth guard never reaches an
  *   interceptor, so an interceptor-based seed leaves 401s and 403s untraceable.

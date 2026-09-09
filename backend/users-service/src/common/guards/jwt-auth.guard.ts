@@ -7,7 +7,7 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  * Verifies the bearer token on every route not marked `@Public()`.
  *
  * Guards run **before** interceptors, so a rejection here never reaches the request-logging
- * interceptor and produces no incoming/outgoing pair. The trace id still exists — the seeding
+ * interceptor and produces no request.in/response.out pair. The trace id still exists — the seeding
  * middleware runs before guards — and the exception filter logs the rejection under it, which is
  * what keeps 401s visible in a trace.
  */

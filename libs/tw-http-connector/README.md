@@ -1,7 +1,8 @@
 # @tw/http-connector
 
 The outbound half of the tracing system. A `fetch`-based HTTP client for NestJS services that
-carries the current request's trace id to the next service without being asked.
+carries the current request's trace id to the next service without being asked — and says who it is
+while doing it, which is what turns correlated log lines into a call graph.
 
 Depends on [@tw/tracing](../tw-tracing/README.md) for the header contract and
 [@tw/logger](../tw-logger/README.md) for the trace-aware logging surface and masking helpers.
@@ -38,6 +39,19 @@ export class AppModule {}
 > span ids. When the two disagree, every call this service makes appears in traces as an orphaned
 > root, and each individual log line still looks perfectly correct. It is the single easiest way to
 > break tracing without noticing.
+
+`forRoot()` therefore **throws** rather than registering a module that cannot identify itself:
+
+```txt
+HttpConnectionModule.forRoot() requires a non-empty `userAgent`, received undefined.
+```
+
+The type has always required it, which is not the same as it being enforced. The route in is
+`userAgent: process.env.DEPLOYMENT_NAME` with no fallback, in a deployment that does not set the
+variable: well-typed at compile time, `undefined` at runtime, and every call goes out as
+`User-Agent: "undefined"` while the service boots and serves traffic normally. Keep the `??`
+fallback, or set the variable — but the failure now happens at boot instead of in a trace nobody
+reads for six months.
 
 ---
 
@@ -89,14 +103,63 @@ await this.http.connect({ url, method: 'GET', traceId });
   failure surfaces as `504`, distinguishable from an upstream that answered `500`.
 - **Error mapping**: a non-2xx response becomes an `HttpException` carrying the upstream status and
   parsed body, so a failing dependency surfaces as that dependency's status.
-- **Verbose logging** at `silly` (`LOGGER_LEVEL=silly`) for every request and response, with
-  credentials masked by `@tw/logger`.
-- **Header hygiene**: names are normalised to lowercase and casing variants of the trace header are
-  removed before the canonical one is set, so exactly one reaches the wire.
+- **Call records**: a compact `request.out` / `response.in` pair at `info` on every call, carrying
+  the method, the masked URL, the status and a client-observed `duration`. This is the caller's own
+  statement that the call happened — the only record of it when the callee does not log.
+- **Verbose logging** at `verbose` (`LOGGER_LEVEL=verbose`), adding a detailed pair with masked
+  headers and bodies. Turn it off with `verboseLogs: false`; the `info` pair stays either way.
+- **Header hygiene**: names are normalised to lowercase, and both contract headers — `user-agent`
+  and `x-trace-id` — are written last with every other casing variant of themselves deleted first,
+  so exactly one of each reaches the wire.
+
+### The two contract headers
+
+They are handled identically, and neither can be set through `headers`:
+
+| | Value | Overridable per call |
+|---|---|---|
+| `user-agent` | the module's `userAgent` | `userAgent` — for a third-party API only. It breaks the trace edge for that call |
+| `x-trace-id` | inherited from the inbound request | `traceId` — for cron ticks and fan-out under a derived id |
+
+`{ 'User-Agent': …, 'user-agent': … }` deserves its own note, because it is the failure that hides
+best: two distinct keys in a plain object, one header on the wire, where `fetch` **combines** them
+into `orders-service, curl/8.4.0` rather than picking one. No receiver reads that as an identity,
+and nothing before the wire would have shown it. The delete-then-write is what makes it impossible.
+
+### Forwarded headers go to every destination
+
+`forwardHeaders` is module-level, so a header on that list is attached to **every** call the
+request-scoped connector makes — not only calls to our own services. With `authorization` on the
+list, a call to a third-party API would carry the end user's bearer token unless the call site sets
+its own.
+
+In practice it does. **Every third-party call passes its own `Authorization`, and a caller-supplied
+header always replaces the forwarded one** — caller headers are merged last, and they are
+lowercased on the way in precisely so the override lands on the same key rather than becoming a
+second `Authorization` beside it. So the leak needs a third-party call that forgot its own
+credentials, which is not a thing that gets written by accident.
+
+Two things keep the residual risk small, and both are worth knowing rather than assuming:
+
+- **Tokens are short-lived.** A leaked one is a credential for the rest of its TTL, not indefinitely.
+  It is still valid across the workspace during that window, so this bounds the damage rather than
+  removing it.
+- **Third-party traffic is reviewed on `test` before it ships.** What we send outside our own
+  services is checked deliberately during development and testing, which is the stage this class of
+  mistake is meant to be caught at — an unintended `Authorization` on an outbound call is visible in
+  the verbose request log (`LOGGER_LEVEL=verbose`), with the value masked.
+
+The rule that follows: **when you add a call to anything that is not ours, look at what the
+connector will attach to it.** That check belongs in development and in test-environment review, not
+in a runtime guard — a destination allowlist would have to track service URLs that differ per
+environment, and its failure mode is worse than the one it prevents: a misconfigured origin drops
+`authorization` silently and produces 401s that look like an auth bug, in production only.
 
 `forwardHeaders` (default `['accept-language']`) copies chosen inbound headers onto outbound calls.
-**The trace id is deliberately not on that list** — it has its own dedicated path, so no
-reconfiguration of header forwarding can silently switch tracing off.
+**Neither contract header may appear on that list, and `forRoot()` throws if one does.** Both have a
+dedicated path, so forwarding one as well would put the inbound value — the browser's
+`Mozilla/5.0…` — in the same header the connector writes its own into, and no reconfiguration of
+header forwarding can silently switch tracing off.
 
 ---
 

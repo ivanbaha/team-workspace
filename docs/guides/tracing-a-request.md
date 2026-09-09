@@ -92,14 +92,14 @@ These are the guards that matter:
 | Field | What it means | What it does **not** mean |
 |---|---|---|
 | `services.gaps` | The service took part but emitted no request logs | **Not** that it was skipped. Usually it has not adopted `@tw/logger`, runs below `info` level, or is not ours |
-| `ambiguous: true` | Another request was open on the same endpoint, so the incoming/outgoing pairing is a guess | Not that the call failed. **Do not trust the duration**; the call definitely happened |
+| `ambiguous: true` | Another request was open on the same endpoint, so the request.in/response.out pairing is a guess | Not that the call failed. **Do not trust the duration**; the call definitely happened |
 | `paired: false` | One half of the pair is missing — usually the window clipped it | Not that the request was incomplete |
 | `unterminated: true` | A request never produced a response — crash, timeout, or still in flight | This is frequently the answer, not noise |
 | `repeatedEdges` | The same call was made more than once in one request | Could be cache misses or duplicated work. The tool refuses to guess which |
 | `found: false`, all probes `empty` | Searched successfully; the id is genuinely not there in that window | Widen with `--lookback` before concluding it never happened |
 | `found: false`, a probe `unreachable` | An environment could not be queried — usually an expired token | **Not** proof of absence |
 
-One more, because it causes real confusion: **a 401 or 403 produces no incoming/outgoing pair at
+One more, because it causes real confusion: **a 401 or 403 produces no request.in/response.out pair at
 all.** Guards run before interceptors in NestJS, so a rejected request never reaches the
 request-logging interceptor. The rejection is still logged under the trace id by the exception
 filter — you will see the `warn` line but no span:
@@ -117,8 +117,13 @@ Zero spans plus a 401 warning is a complete, correct trace of an unauthenticated
 | Symptom | Likely cause |
 |---|---|
 | A service's calls appear as orphaned roots | Its outbound `User-Agent` disagrees with the name it logs under. Check that `userAgent` in `HttpConnectionModule.forRoot()` and `DEPLOYMENT_NAME` are the same value |
+| A service's calls are attributed to `undefined` | `userAgent` resolved to nothing at runtime — `process.env.DEPLOYMENT_NAME` with no `??` fallback, in a deployment that does not set it. Newer builds refuse to boot instead; an older one keeps running |
+| Every browser call is one node called `browser` | Working as designed. `user-agent` is a forbidden header name in `fetch`, so no microfrontend can name itself — see [The entry point](../architecture/distributed-tracing.md#the-entry-point--the-browser) |
 | The trace starts one service too late | The first service is not seeding an id. Check that `TracingModule.forRoot()` is imported there, not only downstream |
+| The trace starts at the edge service, never at the browser | The frontend interceptor is not installed, or the API is cross-origin without `Access-Control-Allow-Headers: x-trace-id` on the preflight |
+| The user cannot find an id to report | Cross-origin without `Access-Control-Expose-Headers: x-trace-id`. The echo arrives, but the page cannot read it — the request itself succeeds, so nothing looks broken |
 | A service logs lines but no request pair | `LOGGER_REQUEST_LOGGING=off`, or the path is in the exclude list (`/health`, `/version`, `/ready`, `/metrics`) |
+| A trace id is 128 characters and looks cut off | It is. An inbound id longer than that is truncated by `ensureTraceId` — the caller sent an oversized header |
 | Log lines with no `traceId` at all | Work outside an HTTP request — a cron tick or a queue consumer — that did not thread an id. See [the manual fallback](../architecture/distributed-tracing.md#4-the-manual-fallback) |
 | Nothing found, but you are sure it happened | Wrong environment, or a window that does not cover it. Widen `--lookback` before concluding anything |
 
@@ -154,15 +159,15 @@ Grep both terminals for `LOCAL-DEMO-1`. With `LOGGER_FORMAT=json` you get exactl
 store:
 
 ```txt
-products-service  GET /v1/products    direction=incoming  caller=curl/8.7.1
+products-service  GET /v1/products    direction=request.in  caller=curl/8.7.1
 products-service  ProductsService.findAll   Returning 3 product(s)
-users-service     GET /v1/users/1     direction=incoming  caller=products-service
-users-service     GET /v1/users/1     direction=outgoing  statusCode=200  duration=1
-users-service     GET /v1/users/2     direction=incoming  caller=products-service
-users-service     GET /v1/users/2     direction=outgoing  statusCode=200  duration=0
-users-service     GET /v1/users/1     direction=incoming  caller=products-service
-users-service     GET /v1/users/1     direction=outgoing  statusCode=200  duration=0
-products-service  GET /v1/products    direction=outgoing  statusCode=200  duration=23
+users-service     GET /v1/users/1     direction=request.in  caller=products-service
+users-service     GET /v1/users/1     direction=response.out  statusCode=200  duration=1
+users-service     GET /v1/users/2     direction=request.in  caller=products-service
+users-service     GET /v1/users/2     direction=response.out  statusCode=200  duration=0
+users-service     GET /v1/users/1     direction=request.in  caller=products-service
+users-service     GET /v1/users/1     direction=response.out  statusCode=200  duration=0
+products-service  GET /v1/products    direction=response.out  statusCode=200  duration=23
 ```
 
 Three calls to users-service for three products — and `/v1/users/1` twice, because two products
@@ -171,7 +176,7 @@ share an owner. That is an N+1 the trace makes visible in one glance.
 Things worth trying from here:
 
 ```bash
-# A failure: the 404 carries the status on the outgoing line
+# A failure: the 404 carries the status on the response.out line
 curl -s "http://localhost:4002/v1/products/999" -H "Authorization: Bearer $TOKEN" \
   -H 'x-trace-id: LOCAL-DEMO-FAIL' > /dev/null
 
@@ -179,7 +184,7 @@ curl -s "http://localhost:4002/v1/products/999" -H "Authorization: Bearer $TOKEN
 curl -s "http://localhost:4002/v1/products/1" -H 'x-trace-id: LOCAL-DEMO-401' > /dev/null
 
 # Every outbound request and response, with credentials masked
-LOGGER_LEVEL=silly yarn dev:products-be
+LOGGER_LEVEL=verbose yarn dev:products-be
 ```
 
 ---

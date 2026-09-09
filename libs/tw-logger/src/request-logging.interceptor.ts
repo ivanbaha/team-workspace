@@ -44,15 +44,28 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Emits the paired `incoming` / `outgoing` records that turn a set of correlated log lines into a
+ * Emits the paired `request.in` / `response.out` records that turn a set of correlated log lines into a
  * call graph.
  *
  * A trace id alone only *groups* lines. What makes them a graph is this pair:
  *
  * ```json
- * {"direction":"incoming","method":"GET","path":"/v1/users/1","caller":"products-service"}
- * {"direction":"outgoing","method":"GET","path":"/v1/users/1","statusCode":200,"duration":124}
+ * {"direction":"request.in","method":"GET","path":"/v1/users/1","caller":"products-service"}
+ * {"direction":"response.out","method":"GET","path":"/v1/users/1","statusCode":200,"duration":124}
  * ```
+ *
+ * **Both lines describe the server side of one request**, and the `direction` values say so
+ * explicitly. The noun comes first because the direction alone is ambiguous: a response this
+ * service sends and a request this service makes are both, in plain English, "outgoing".
+ *
+ * | Value | Written by | Means |
+ * |---|---|---|
+ * | `request.in` | this interceptor | a request arrived here |
+ * | `response.out` | this interceptor | this service answered it |
+ * | `request.out` | `@tw/http-connector` | this service called someone else |
+ * | `response.in` | `@tw/http-connector` | that call came back |
+ *
+ * Only the first two build spans. The connector's pair is logged at `silly` and is diagnostic.
  *
  * Three consequences worth knowing:
  *
@@ -95,9 +108,9 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     const startTime = Date.now();
 
     if (this.mode === 'full') {
-      this.logger.silly(
+      this.logger.verbose(
         JSON.stringify({
-          direction: 'incoming',
+          direction: 'request.in',
           method,
           url: maskUrlForLog(url),
           caller: req.headers?.['user-agent'],
@@ -109,7 +122,7 @@ export class RequestLoggingInterceptor implements NestInterceptor {
       );
     } else {
       this.logger.info(
-        JSON.stringify({ direction: 'incoming', method, path, caller: req.headers?.['user-agent'] }),
+        JSON.stringify({ direction: 'request.in', method, path, caller: req.headers?.['user-agent'] }),
         logContext,
         traceId,
       );
@@ -120,7 +133,7 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap({
         next: (responseBody) => this.logOutgoing({ ...shared, responseBody }),
-        // Without this branch a failed request emits no outgoing record at all — so the requests
+        // Without this branch a failed request emits no response.out record at all — so the requests
         // most worth tracing would be the ones missing their status code and duration.
         error: (error) => this.logOutgoing({ ...shared, error }),
       }),
@@ -142,9 +155,9 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     const statusCode = error ? resolveErrorStatus(error, res) : (res?.statusCode ?? res?.raw?.statusCode);
 
     if (this.mode === 'full') {
-      this.logger.silly(
+      this.logger.verbose(
         JSON.stringify({
-          direction: 'outgoing',
+          direction: 'response.out',
           method,
           url: maskUrlForLog(url),
           statusCode,
@@ -159,7 +172,7 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     }
 
     this.logger.info(
-      JSON.stringify({ direction: 'outgoing', method, path, statusCode, duration }),
+      JSON.stringify({ direction: 'response.out', method, path, statusCode, duration }),
       logContext,
       traceId,
     );

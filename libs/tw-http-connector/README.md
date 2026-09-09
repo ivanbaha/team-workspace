@@ -108,6 +108,12 @@ await this.http.connect({ url, method: 'GET', traceId });
   statement that the call happened — the only record of it when the callee does not log.
 - **Verbose logging** at `verbose` (`LOGGER_LEVEL=verbose`), adding a detailed pair with masked
   headers and bodies. Turn it off with `verboseLogs: false`; the `info` pair stays either way.
+
+> **`verboseLogs` defaults to `true`, so raising `LOGGER_LEVEL` to `verbose` starts logging outbound
+> request bodies.** Nothing else has to change for that to happen — the same coupling
+> [`@tw/logger` documents](../tw-logger/README.md#configuration) for inbound requests, and the same
+> caveat: masking covers credentials, not personal data. A service whose level is not fixed should
+> set `verboseLogs: false` and opt in deliberately.
 - **Header hygiene**: names are normalised to lowercase, and both contract headers — `user-agent`
   and `x-trace-id` — are written last with every other casing variant of themselves deleted first,
   so exactly one of each reaches the wire.

@@ -165,6 +165,16 @@ All from the environment; read once at construction.
 | `LOGGER_FORMAT` | `json` | `pretty` for local development only — pretty output is not parseable |
 | `LOGGER_REQUEST_LOGGING` | `full` at `verbose`, else `compact` | `off`, `compact`, `full` |
 
+> **Raising `LOGGER_LEVEL` to `verbose` turns payload logging on.** The two settings are coupled by
+> the default, so a level raised for an unrelated reason — chasing a startup problem, turning up one
+> noisy module — also starts writing masked headers and bodies for every request. That is rarely
+> what someone changing a log level intends, and [masking covers credentials, not personal
+> data](#masking): the warning below about treating trace output as production data now applies to a
+> level change, not only to a deliberate switch.
+>
+> **Set `LOGGER_REQUEST_LOGGING` explicitly wherever the level is not fixed.** It always wins, so
+> `LOGGER_REQUEST_LOGGING=compact` pins payloads off however the level moves.
+
 ```yaml
 # Kubernetes: POD_NAME comes from the downward API
 env:
@@ -185,4 +195,6 @@ removed, so two masked values can still be compared — that is how you tell "th
 on every retry" from "a new token each time".
 
 **Masking covers credentials, not personal data.** A logged request body still contains whatever the
-caller sent. Treat trace output as production data.
+caller sent. Treat trace output as production data — and note that a body reaches the log whenever
+the level is `verbose`, not only when someone deliberately asked for `full`; see
+[Configuration](#configuration).

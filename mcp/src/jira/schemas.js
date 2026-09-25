@@ -29,7 +29,7 @@ export const jiraToolSchemas = [
   },
   {
     name: "jira_issue_create",
-    description: "Create a new Jira issue [the most fresh version]",
+    description: "Create a new Jira issue",
     inputSchema: {
       type: "object",
       properties: {
@@ -39,7 +39,7 @@ export const jiraToolSchemas = [
         },
         project: {
           type: "string",
-          description: "Jira project key (default: TW)",
+          description: "Jira project key (default: configured default or TW)",
         },
         issuetype: {
           type: "string",
@@ -56,7 +56,7 @@ export const jiraToolSchemas = [
         },
         reporter: {
           type: "string",
-          description: "Reporter username (default: zleonat)",
+          description: "Reporter username (defaults to configured default or authenticated user)",
         },
         priority: {
           type: "string",
@@ -82,9 +82,8 @@ export const jiraToolSchemas = [
           type: "array",
           items: {
             type: "string",
-            enum: ["test", "uat", "prod", "uat-china", "prod-china"],
           },
-          description: "Environment/s (e.g. test, uat, prod, uat-china, prod-china). Auto-defaults to uat for Bugs",
+          description: "Environment/s (e.g. test, uat, prod). Mapped via JIRA_ENVIRONMENTS if configured",
         },
         sprint: {
           type: "number",
@@ -92,8 +91,7 @@ export const jiraToolSchemas = [
         },
         team: {
           type: "string",
-          enum: ["dev", "devops"],
-          description: "Team alias: dev = Web team, devops = DevOps Team (default: dev)",
+          description: "Team alias (e.g. dev, devops). Mapped via JIRA_TEAMS if configured",
         },
         raw_fields: {
           type: "object",

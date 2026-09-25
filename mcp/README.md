@@ -81,6 +81,11 @@ See `example.env` in the workspace root for a complete template.
 | `GITLAB_BASE_URL` | no | GitLab instance URL (default: `https://gitlab.company.internal/`) |
 | `JIRA_PAT` | yes | Jira Personal Access Token |
 | `JIRA_BASE_URL` | no | Jira instance URL (default: `https://jira.company.internal`) |
+| `JIRA_DEFAULT_PROJECT` | no | Default Jira project key (default: `TW`) |
+| `JIRA_DEFAULT_REPORTER` | no | Default reporter username (defaults to token owner) |
+| `JIRA_FIELDS` | no | JSON object mapping field aliases (`sprint`, `team`, `environments`) to customfield IDs |
+| `JIRA_ENVIRONMENTS` | no | JSON object mapping environment names to field option IDs |
+| `JIRA_TEAMS` | no | JSON object mapping team aliases to team IDs |
 | `GRAFANA_ENVS` | no | JSON object with Grafana environment credentials |
 | `MONGODB_ENVS` | no | JSON object with MongoDB connection strings |
 | `DOCS_SEARCH_ENABLED` | no | Enable the opt-in `docs_search` hybrid tool (default `false`) |

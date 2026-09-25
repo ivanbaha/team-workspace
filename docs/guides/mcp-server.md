@@ -63,7 +63,7 @@ All credentials and options are configured in the `.env` file at the root of the
 2. Populate the required tokens:
    - `GITLAB_PAT`: Your GitLab Personal Access Token.
    - `JIRA_PAT`: Your Jira Personal Access Token.
-3. Configure target environments for MongoDB and Grafana as needed (defined as JSON maps in the environment variables).
+3. Configure target environments for MongoDB and Grafana, and optional Jira custom fields, environments, or teams as needed (defined as JSON maps in the environment variables).
 
 ---
 

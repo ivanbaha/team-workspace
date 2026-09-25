@@ -37,6 +37,15 @@ function parseOptionalJsonEnv(name) {
   }
 }
 
+function validateOptionalObjectEnv(name) {
+  const data = parseOptionalJsonEnv(name);
+  if (!data) return {};
+  if (typeof data !== 'object' || Array.isArray(data) || data === null) {
+    throw new Error(`${name} must be a JSON object.`);
+  }
+  return data;
+}
+
 function validateGrafanaEnvs(data) {
   if (typeof data !== 'object' || Array.isArray(data) || data === null) {
     throw new Error('GRAFANA_ENVS must be a JSON object.');
@@ -96,6 +105,11 @@ export function loadConfig() {
       jira: {
         baseUrl: getOptionalEnv('JIRA_BASE_URL', 'https://jira.company.internal'),
         pat: getRequiredEnv('JIRA_PAT'),
+        defaultProject: getOptionalEnv('JIRA_DEFAULT_PROJECT', 'TW'),
+        defaultReporter: getOptionalEnv('JIRA_DEFAULT_REPORTER', null),
+        fields: validateOptionalObjectEnv('JIRA_FIELDS'),
+        environments: validateOptionalObjectEnv('JIRA_ENVIRONMENTS'),
+        teams: validateOptionalObjectEnv('JIRA_TEAMS'),
       },
       grafana: null,
       mongodb: null,

@@ -1,22 +1,14 @@
 import { JiraAPI } from "./api.js";
 import { logger } from "../utils/logger.js";
 
-const JIRA_ENVIRONMENTS = {
-  "test":        { id: "331545", name: "Global/India Test" },
-  "uat":         { id: "331543", name: "Global/India UAT/ACC" },
-  "prod":        { id: "331544", name: "Global/India Production" },
-  "uat-china":   { id: "519664", name: "China UAT/ACC" },
-  "prod-china":  { id: "519665", name: "China Production" },
-};
-
-const JIRA_TEAMS = {
-  dev: { id: 5492, name: "Web team" },
-  devops: { id: 5491, name: "DevOps Team" },
-};
-
 export class JiraTools {
   constructor(config) {
     this.api = new JiraAPI(config.jira.baseUrl, config.jira.pat);
+    this.defaultProject = config.jira.defaultProject || "TW";
+    this.defaultReporter = config.jira.defaultReporter || null;
+    this.fields = config.jira.fields || {};
+    this.environments = config.jira.environments || {};
+    this.teams = config.jira.teams || {};
   }
 
   async initialize() {
@@ -30,12 +22,36 @@ export class JiraTools {
   formatIssue(json) {
     const f = json.fields;
 
-    // Parse sprint name from the raw sprint string (customfield_11910)
+    // Parse sprint name from configured field, f.sprint, or dynamic search
     let sprint = null;
-    const sprintRaw = f.customfield_11910;
-    if (Array.isArray(sprintRaw) && sprintRaw.length > 0) {
-      const match = sprintRaw[0].match(/name=([^,\]]+)/);
-      sprint = match ? match[1] : null;
+    const sprintField = this.fields.sprint;
+    const sprintRaw = sprintField ? f[sprintField] : (f.sprint ?? null);
+
+    if (sprintRaw) {
+      if (Array.isArray(sprintRaw) && sprintRaw.length > 0) {
+        if (typeof sprintRaw[0] === "string") {
+          const match = sprintRaw[0].match(/name=([^,\]]+)/);
+          sprint = match ? match[1] : sprintRaw[0];
+        } else if (typeof sprintRaw[0] === "object" && sprintRaw[0]?.name) {
+          sprint = sprintRaw[0].name;
+        }
+      } else if (typeof sprintRaw === "object" && sprintRaw?.name) {
+        sprint = sprintRaw.name;
+      } else if (typeof sprintRaw === "string") {
+        const match = sprintRaw.match(/name=([^,\]]+)/);
+        sprint = match ? match[1] : sprintRaw;
+      }
+    } else {
+      // Dynamic fallback search across fields for GreenHopper sprint pattern
+      for (const val of Object.values(f)) {
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === "string" && val[0].includes("name=")) {
+          const match = val[0].match(/name=([^,\]]+)/);
+          if (match) {
+            sprint = match[1];
+            break;
+          }
+        }
+      }
     }
 
     // Filter out GitLab bot auto-comments
@@ -115,69 +131,82 @@ export class JiraTools {
     }
   }
   async createIssue(params) {
-      try {
-        const {
-          project = "TW",
-          summary,
-          issuetype = "Task",
-          description,
-          assignee,
-          reporter = "zleonat",
-          priority = "Medium",
-          labels,
-          fixVersions,
-          environments,
-          sprint,
-          team = "dev",
-          raw_fields,
-        } = params;
+    try {
+      const {
+        project = this.defaultProject,
+        summary,
+        issuetype = "Task",
+        description,
+        assignee,
+        reporter = this.defaultReporter,
+        priority = "Medium",
+        labels,
+        fixVersions,
+        environments,
+        sprint,
+        team,
+        raw_fields,
+      } = params;
 
-        const fields = {
-          project: { key: project },
-          summary,
-          issuetype: { name: issuetype },
-          reporter: { name: reporter },
-          priority: { name: priority },
-        };
+      const fields = {
+        project: { key: project },
+        summary,
+        issuetype: { name: issuetype },
+        priority: { name: priority },
+      };
 
-        if (description !== undefined) fields.description = description;
-        if (assignee !== undefined) fields.assignee = { name: assignee };
-        if (labels !== undefined) fields.labels = labels;
-        if (sprint !== undefined) fields.customfield_11910 = sprint;
-        if (team && JIRA_TEAMS[team]) fields.customfield_14335 = String(JIRA_TEAMS[team].id);
+      if (reporter) fields.reporter = { name: reporter };
+      if (description !== undefined) fields.description = description;
+      if (assignee !== undefined) fields.assignee = { name: assignee };
+      if (labels !== undefined) fields.labels = labels;
 
-        // Environments (customfield_15521) — for Bugs and Tasks
-        if (environments !== undefined) {
-          fields.customfield_15521 = environments.map((e) => {
-            const env = JIRA_ENVIRONMENTS[e];
-            return env ? { id: env.id } : { id: e };
-          });
-        } else if (issuetype === "Bug") {
-          fields.customfield_15521 = [{ id: JIRA_ENVIRONMENTS["uat"].id }];
-        }
-
-        // Affects Version — for Bugs and Tasks; auto-resolve only for Bugs
-        if (fixVersions !== undefined) {
-          fields.fixVersions = fixVersions.map((v) => ({ name: v }));
-        }
-
-        if (issuetype === "Bug" || issuetype === "Task") {
-          const versions = await this.resolveAffectsVersion(project, params.affectsVersions);
-          if (issuetype === "Bug" && versions) {
-            fields.versions = versions;
-          } else if (issuetype === "Task" && params.affectsVersions !== undefined && versions) {
-            fields.versions = versions;
-          }
-        }
-
-        const mergedFields = raw_fields ? { ...fields, ...raw_fields } : fields;
-
-        const result = await this.api.createIssue(mergedFields);
-        return this.createResponse(true, { key: result.key, id: result.id, self: result.self }, "Issue created successfully");
-      } catch (error) {
-        return this.createResponse(false, null, error.message);
+      if (sprint !== undefined && this.fields.sprint) {
+        fields[this.fields.sprint] = sprint;
       }
+
+      if (team && this.fields.team) {
+        const teamObj = this.teams[team];
+        const teamId = teamObj?.id ?? teamObj ?? team;
+        fields[this.fields.team] = String(teamId);
+      }
+
+      // Environments — mapped if field and environment mappings are configured
+      if (this.fields.environments) {
+        if (environments !== undefined) {
+          fields[this.fields.environments] = environments.map((e) => {
+            const env = this.environments[e];
+            const envId = env?.id ?? env ?? e;
+            return typeof envId === "object" ? envId : { id: String(envId) };
+          });
+        } else if (issuetype === "Bug" && (this.environments["uat"] || this.environments["test"])) {
+          const defaultEnv = this.environments["uat"] || this.environments["test"];
+          const defaultId = defaultEnv?.id ?? defaultEnv;
+          fields[this.fields.environments] = [{ id: String(defaultId) }];
+        }
+      }
+
+      // Affects Version — for Bugs and Tasks; auto-resolve only for Bugs
+      if (fixVersions !== undefined) {
+        fields.fixVersions = fixVersions.map((v) => ({ name: v }));
+      }
+
+      if (issuetype === "Bug" || issuetype === "Task") {
+        const versions = await this.resolveAffectsVersion(project, params.affectsVersions);
+        if (issuetype === "Bug" && versions) {
+          fields.versions = versions;
+        } else if (issuetype === "Task" && params.affectsVersions !== undefined && versions) {
+          fields.versions = versions;
+        }
+      }
+
+      const mergedFields = raw_fields ? { ...fields, ...raw_fields } : fields;
+
+      const result = await this.api.createIssue(mergedFields);
+      return this.createResponse(true, { key: result.key, id: result.id, self: result.self }, "Issue created successfully");
+    } catch (error) {
+      return this.createResponse(false, null, error.message);
     }
+  }
   async resolveAffectsVersion(projectKey, explicit) {
     if (explicit !== undefined) {
       return explicit.map((v) => ({ name: v }));

@@ -10,8 +10,18 @@ export const BASE_HTTP_CONNECTOR = 'BASE_HTTP_CONNECTOR';
 /** DI token for the logger the connector writes its verbose request/response records through. */
 export const HC_LOGGER = 'HC_LOGGER';
 
-/** Headers forwarded from the inbound request when the caller does not override the list. */
-export const DEFAULT_FORWARD_HEADERS: string[] = ['accept-language'];
+/**
+ * Headers forwarded from the inbound request when the caller does not override the list.
+ *
+ * `accept-language` rides along because the next service can do nothing useful with a request it
+ * cannot localise. `cache-control` rides along because a freshness demand (`no-cache`) is a
+ * property of the *caller* — the person pressing the "give me fresh data" button — and it must
+ * reach the end of the chain or every service after the first internal hop serves from its cache
+ * while the header looks honoured. A service that does not cache ignores it; a service that caches
+ * is expected to honour it (see `@tw/cache`). Unlike `authorization`, it is not a credential, so
+ * carrying it to every destination leaks nothing.
+ */
+export const DEFAULT_FORWARD_HEADERS: string[] = ['accept-language', 'cache-control'];
 
 /**
  * The header carrying this service's identity. Lowercase for the same reason as

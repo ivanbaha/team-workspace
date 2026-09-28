@@ -35,6 +35,7 @@ Central monorepo for the development team. All frontend microfrontends, backend 
 - [backend/README.md](./backend/README.md) — Overview of all backend services
   - [users-service](./backend/users-service/README.md) — NestJS REST API: Users domain
   - [products-service](./backend/products-service/README.md) — NestJS REST API: Products domain
+  - [products-sync-service](./backend/products-sync-service/README.md) — Background worker: recomputes category aggregates through the shared cache's work queue
 
 ### Infrastructure
 
@@ -52,6 +53,7 @@ yarn gitops:validate     # do all three overlays still build?
   - [@tw/tracing](./libs/tw-tracing/README.md) — The Trace-Id contract: header, id format, the seed
   - [@tw/logger](./libs/tw-logger/README.md) — JSON logger with the trace id on every line
   - [@tw/http-connector](./libs/tw-http-connector/README.md) — Outbound client that propagates the trace id
+  - [@tw/cache](./libs/tw-cache/README.md) — The shared cache client: read-through, negative caching, sets and locks
   - tw-common-frontend — Shared React hooks, context providers, and UI primitives
   - tw-api-client — Typed HTTP client wrappers for all internal REST APIs
   - tw-common-backend — Shared NestJS guards, JWT utilities, and error helpers
@@ -84,6 +86,7 @@ yarn gitops:validate     # do all three overlays still build?
     - [SDLC Quickstart](./docs/guides/sdlc-quickstart.md) — You have a ticket; what do you actually do?
     - [Onboarding](./docs/guides/onboarding.md) — Getting started guide for new team members
     - [Tracing a Request](./docs/guides/tracing-a-request.md) — Following one request across every service that touched it
+    - [Debugging the Cache](./docs/guides/debugging-the-cache.md) — Stale entries, silent misses, dead invalidations: the runbook
     - [Workspace MCP Server](./docs/guides/mcp-server.md) — In-depth connection and setup guide for the MCP server
     - [Workspace Automation](./docs/guides/workspace-automation.md) — Git hooks, daily setup guard, change-aware index rebuilds, automation security
     - [Docs Search Operations](./docs/guides/docs-rag-operations.md) — Health checks, symptom → cause, recovery
@@ -95,6 +98,7 @@ yarn gitops:validate     # do all three overlays still build?
     - [Architecture Overview](./docs/architecture/architecture.md) — System architecture overview
     - [API Contracts](./docs/architecture/api-contracts.md) — Shared API conventions
     - [Distributed Tracing](./docs/architecture/distributed-tracing.md) — One header, one log field, no tracing stack
+    - [Shared Cache](./docs/architecture/shared-cache.md) — One cache server, three roles, failure policy per operation
     - [Hybrid RAG over the Team Documentation](./docs/architecture/docs-rag.md) — How the agent searches these docs
   - [Incidents](./docs/incidents/README.md) — Security and production incidents: what happened, whether it reached us, what to run
   - [Release runbooks](./docs/release/README.md) — One-off operations that have to happen inside a deployment window

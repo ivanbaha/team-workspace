@@ -17,6 +17,9 @@ runbooks.
 - [Tracing a Request](./tracing-a-request.md) — Following one request across
   every service that touched it: getting a trace id, assembling the call chain,
   and reading the result without drawing false conclusions from a heuristic.
+- [Debugging the Cache](./debugging-the-cache.md) — Stale answers, silent
+  misses, dead invalidations, a stalled queue: symptom → cause → do, the
+  `Cache-Control` repair, and reading `/health`'s counters cold-vs-dead.
 
 ## Operating the workspace
 
@@ -40,6 +43,9 @@ runbooks.
 - [Distributed Tracing](../architecture/distributed-tracing.md) — Why tracing is
   one header and one log field rather than a tracing stack, what that buys, and
   what it gives up.
+- [Shared Cache](../architecture/shared-cache.md) — Why every entity has
+  exactly one writer, why reads fail open while queue writes fail closed, and
+  the traps each rule in the design exists to avoid.
 - [Hybrid RAG design](../architecture/docs-rag.md) — Why the search layer is
   built the way it is, and — most importantly — what is deliberately kept
   **out** of the index.

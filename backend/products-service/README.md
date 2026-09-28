@@ -8,7 +8,7 @@ REST API for the Products domain. Manages product catalogue, inventory levels, a
 
 | Method | Path              | Auth | Description                                          |
 | ------ | ----------------- | ---- | ---------------------------------------------------- |
-| GET    | /health           | —    | Health check                                         |
+| GET    | /health           | —    | Health check, incl. cache state                      |
 | GET    | /v1/products      | JWT  | List products (`?search=`, `?category=`, `?expandOwner=`) |
 | GET    | /v1/products/:id  | JWT  | Get product by ID (`?expandOwner=`)                  |
 | POST   | /v1/products      | JWT  | Create a new product                                 |
@@ -28,6 +28,8 @@ Full API contract: [docs/architecture/api-contracts.md](../../docs/architecture/
 - JWT verification via a global guard (tokens issued by users-service)
 - [@tw/tracing](../../libs/tw-tracing/README.md), [@tw/logger](../../libs/tw-logger/README.md),
   [@tw/http-connector](../../libs/tw-http-connector/README.md)
+- [@tw/cache](../../libs/tw-cache/README.md) — this service is a cache **owner** (products, product
+  lists, the catalog composite) and a **consumer** (user entries owned by users-service)
 - In-memory store (demo; swap for a real DB in production)
 
 ---
@@ -75,6 +77,46 @@ Reproduce it locally: [Tracing a Request](../../docs/guides/tracing-a-request.md
 
 ---
 
+## Shared cache: the owner and consumer roles
+
+This service plays both parts of the design. As a **consumer**, `?expandOwner=true` resolves owners
+through the shared cache first, HTTP second:
+
+1. `UsersConnector` reads the owner's entry (`users-service_user_<id>`) **directly** from the cache.
+   A hit costs one cache round trip instead of one HTTP hop — no trace fan-out, no call to
+   users-service — and honours the owner's negative entries ("this user does not exist") too.
+2. On a miss, the connector calls users-service; the owner's read-through fills the entry as a
+   side effect, so the next consumer read is a hit.
+3. This service **never writes** the owner's keys — only the owner knows what a fresh value is.
+   The cache server's ACL enforces it: this service's user may write only its own prefix, and the
+   owner's keys are read-only to it.
+
+As an **owner**, it caches its own data at three rungs of the ladder:
+
+| Read shape | Key | Invalidation |
+| --- | --- | --- |
+| `GET /v1/products/:id` | `products-service_product_<id>` | the item's key, on every write to it — including a negative entry the day its id is re-created |
+| `GET /v1/products`, `?category=` | `products-service_productList_all` / `_<category>` | **every** write to **any** product kills **every** list shape — one `delMany`, deliberately blunt |
+| `GET /v1/products?expandOwner=true` (no filters) | `products-service_req_v1-products_expandowner=true` | this service's writes kill it like any local shape (it can name the key); the TTL bounds the *owner entries users-service contributed* — the half no product write can reach |
+| `GET /v1/products?search=…` | — | never cached: free text cannot form a key space anyone can enumerate |
+
+The blunt list rule is the point, not a shortcut: the membership-vs-content split of "smarter"
+list caching buys one store read per write window and costs invalidation branches that can be
+gotten wrong. `[]` is a valid cached value — "no products in this category" is a fact, unlike
+"this product does not exist", which the next write can change.
+
+A caller sending `Cache-Control: no-cache` bypasses whichever rung served the request and
+refreshes it, and the connector forwards the header to users-service, which does the
+bypass-and-refresh on its side. The demand is the caller's; it survives every hop.
+
+Locally, with no `CACHE_URL`, both services run in-process stores and step 1 never hits —
+start a real cache server to see the sharing (the
+[debugging guide](../../docs/guides/debugging-the-cache.md) shows how, in one command).
+
+The design and its failure policy: [Shared Cache](../../docs/architecture/shared-cache.md).
+
+---
+
 ## Development
 
 ```bash
@@ -94,3 +136,6 @@ yarn dev:products-be  # starts on port 4002 with nodemon + ts-node
 | LOGGER_LEVEL           | info                  | `verbose` adds masked headers and bodies to the request/response records |
 | LOGGER_FORMAT          | json                  | `pretty` for local terminals only                 |
 | LOGGER_REQUEST_LOGGING | follows level         | `off`, `compact`, `full`                          |
+| CACHE_URL              | unset                 | Shared cache server, `redis://…`. Read-write user scoped to this service's prefix in the cluster |
+| CACHE_TTL              | 60                    | Entity and list entry TTL in seconds — the only TTL unit |
+| REQUEST_CACHE_TTL      | 10                    | Composite request cache TTL in seconds — its only invalidation |

@@ -15,12 +15,13 @@ Running `yarn setup` (from the workspace root) clones all libraries listed in
 | **tw-tracing**         | backend   | The Trace-Id contract: header name, id format, and the request seed |
 | **tw-logger**          | backend   | JSON logger with the trace id on every line, plus request logging   |
 | **tw-http-connector**  | backend   | Outbound HTTP client that propagates the trace id to the next service |
+| **tw-cache**           | backend   | The shared cache client: read-through, negative caching, sets and locks, one failure policy |
 | tw-common-frontend     | frontend  | Shared React hooks, context providers, and UI primitives           |
 | tw-api-client          | frontend  | Typed HTTP client wrappers for all internal REST APIs              |
 | tw-common-backend      | backend   | Shared NestJS guards, JWT utilities, and error-handling helpers    |
 | tw-config              | universal | Centralised environment variable loader and schema validation      |
 
-The three bolded packages are checked in here; the rest are cloned by `yarn setup`.
+The four bolded packages are checked in here; the rest are cloned by `yarn setup`.
 
 ---
 
@@ -45,9 +46,10 @@ every individual log line still looks correct.
 | [@tw/tracing](./tw-tracing/README.md) | The wire contract, and why the seed is middleware rather than an interceptor |
 | [@tw/logger](./tw-logger/README.md) | The log record, the two loggers, and the request/response pair traces are built from |
 | [@tw/http-connector](./tw-http-connector/README.md) | Outbound propagation, and why `userAgent` must equal `DEPLOYMENT_NAME` — it is required, and `forRoot()` throws without it |
+| [@tw/cache](./tw-cache/README.md) | The three roles over one shared cache — owner, consumer, operator — and the failure policy that fails open when the cache is broken, loud when the caller is wrong |
 
 ```bash
-yarn build:libs   # tracing → logger → http-connector, in dependency order
+yarn build:libs   # tracing → logger → http-connector → cache, in dependency order
 yarn test:libs
 ```
 

@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The shared cache itself — the one server every participating service talks to.
+# Not a workspace service: the image is pinned here (not via the overlays' `images:`
+# blocks) because it is infrastructure, not something CI builds and promotes.
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - acl-configmap.yaml
+  - secret.yaml
+  - pdb.yaml

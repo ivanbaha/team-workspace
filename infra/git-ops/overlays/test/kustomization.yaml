@@ -20,6 +20,8 @@ images:
     newTag: 1.8.3
   - name: registry.example.com/team-workspace/products-service
     newTag: 2.4.0
+  - name: registry.example.com/team-workspace/products-sync-service
+    newTag: 1.0.0
   - name: registry.example.com/team-workspace/host-frontend
     newTag: 3.1.4
   - name: registry.example.com/team-workspace/users-frontend
@@ -37,6 +39,10 @@ configMapGenerator:
     behavior: create
     envs:
       - config/products-service.env
+  - name: products-sync-service-env
+    behavior: create
+    envs:
+      - config/products-sync-service.env
   - name: host-frontend-env
     behavior: create
     envs:

@@ -19,6 +19,12 @@ git-ops/
       deployment.yaml             — container spec, probes, resources, tracing env
       service.yaml
       kustomization.yaml
+    cache/                        — the shared cache server (see the next section)
+      deployment.yaml             — valkey, eviction + persistence flags, ACL mount
+      service.yaml
+      acl-configmap.yaml          — one ACL user per participating service
+      secret.yaml                 — placeholder credentials (demo values, on purpose)
+      pdb.yaml
   overlays/
     dev/
       kustomization.yaml          — namespace, pinned versions, config generators
@@ -103,6 +109,42 @@ service show a changed reference whether or not its values moved.
 **A new environment variable must be added to every overlay the service runs in**, in the
 same change as the code that reads it. Otherwise the service starts and fails at runtime in
 whichever environment was missed, and the MR itself looks perfect.
+
+---
+
+## The shared cache server
+
+`base/cache/` deploys the one server every participating service caches against. It is not a
+workspace service — the image is an upstream valkey, pinned in the base rather than promoted
+through the overlays, because infrastructure changes by deliberate line-edit, like a
+dependency bump.
+
+Three decisions live in its flags, and each is the deployment half of a rule the client library
+enforces in code:
+
+| Flag | Why |
+| --- | --- |
+| `--maxmemory 200mb --maxmemory-policy volatile-lru` | A full cache evicts the least recently used entry **among the TTL-carrying keys** — every entity, list and composite entry. The no-TTL keys (the work-queue set) are never evicted: an evicted queued id is a recomputation that silently never runs. Every evictable entry is reconstructable (a miss reloads it), so eviction degrades latency, never correctness. |
+| `--save "" --appendonly no` | Persistence OFF, both kinds. A cache restart that resurrects yesterday's entries serves ghosts — entries the owners invalidated or rewrote since, replayed as if nothing happened. Empty-and-rebuild is the correct cold start for a cache. |
+| `--aclfile /etc/valkey/acl/users.acl` | One user per participating service, each scoped to the key pattern it may touch. The owner writes its own prefix; a consumer is read-only **on the owner's prefix** — the server refuses a consumer's write even if the code has a bug that tries. `default` is off. |
+
+The credentials are **placeholder values committed on purpose** — this repository is a curated
+example; a real deployment sources them from a secret manager, and the ACL file and the
+`cache-credentials` Secret must rotate together.
+
+Each participating service's deployment carries the same pair, and the same rule:
+
+```yaml
+env:
+  - name: CACHE_PASSWORD            # reaches the app nowhere else — it exists only
+    valueFrom: { … }                # inside CACHE_URL, so logs and /health cannot leak it
+  - name: CACHE_URL                 # must come after CACHE_PASSWORD: $(…) expansion
+    value: "redis://users-service:$(CACHE_PASSWORD)@cache:6379"
+```
+
+Unset `CACHE_URL` and the service runs against an in-process store instead — everything
+works, nothing is shared. Design and failure policy:
+[Shared Cache](../../docs/architecture/shared-cache.md).
 
 ---
 

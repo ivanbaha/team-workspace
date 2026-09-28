@@ -1,0 +1,17 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cache
+  labels:
+    app.kubernetes.io/name: cache
+    app.kubernetes.io/part-of: team-workspace
+spec:
+  # maxUnavailable: 1, not 0. A budget of zero would refuse node drains entirely,
+  # pinning the cache to whatever node it landed on — and outliving that node's
+  # maintenance window. Allowing the disruption is safe *because of decisions made
+  # elsewhere in this directory*: nothing persists, so a restart is a rebuild; and
+  # every participating service fails open while the cache is gone, by design.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cache

@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache
+  labels:
+    app.kubernetes.io/name: cache
+    app.kubernetes.io/part-of: team-workspace
+spec:
+  # One replica on purpose. The cache holds nothing that survives a restart and
+  # nothing whose loss is a data incident: every entry is rebuilt from its owning
+  # service's source of truth on the next miss. Multi-replica shared caches need
+  # a coherence story between the replicas (or a server that shards for you);
+  # a single shared instance needs neither, which is the trade this example takes.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cache
+        app.kubernetes.io/part-of: team-workspace
+    spec:
+      containers:
+        - name: cache
+          # Pinned here, not in the overlays: infrastructure is promoted by
+          # deliberately changing this line, reviewed like a dependency bump.
+          image: docker.io/valkey/valkey:8.1.3
+          imagePullPolicy: IfNotPresent
+          args:
+            # The eviction policy. `volatile-lru`, not `allkeys-lru`: under
+            # pressure the server evicts the least recently used key **among
+            # those carrying a TTL** — which is every entity, list and composite
+            # entry (all written with EX) — and never the keys that hold no
+            # value: the work-queue set is the only durable thing on this server,
+            # and evicting a queued id is a recomputation that silently never
+            # runs. The batch lock carries its own EX and stays evictable, which
+            # is harmless: an evicted lock is an early release, and the design
+            # treats the lock as a cost optimisation, not the correctness
+            # mechanism. The trade this takes: if the no-TTL keys ever outgrew
+            # maxmemory the server could not evict them — the queue is bounded
+            # by the number of categories, so here that trade is a size
+            # requirement, not a risk.
+            - --maxmemory
+            - 200mb
+            - --maxmemory-policy
+            - volatile-lru
+            # Persistence OFF, both kinds. A cache restart that resurrects
+            # yesterday's entries is a cache that serves ghosts — entries the
+            # owning services invalidated or rewrote since, replayed by the
+            # server as if nothing had happened. Empty-and-rebuild is the
+            # correct cold start for a cache.
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            # Authentication and key-pattern scoping live in the ACL file, not
+            # in flags: one file, one review, one place the blast radius of
+            # every cache user is written down.
+            - --aclfile
+            - /etc/valkey/acl/users.acl
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: acl
+              mountPath: /etc/valkey/acl
+              readOnly: true
+          readinessProbe:
+            # TCP, not a PING command: with the ACL on, an unauthenticated
+            # `valkey-cli ping` is refused, so the command probe would report
+            # the server unhealthy for being correctly locked down.
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              # At or above maxmemory, or the server OOM-kills instead of evicting.
+              memory: 384Mi
+      volumes:
+        - name: acl
+          configMap:
+            name: cache-acl

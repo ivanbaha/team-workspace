@@ -8,12 +8,16 @@ REST API for the Users domain. Manages user accounts, authentication tokens, and
 
 | Method | Path                | Auth | Description                    |
 | ------ | ------------------- | ---- | ------------------------------ |
-| GET    | /health             | —    | Health check                   |
+| GET    | /health             | —    | Health check, incl. cache state |
 | POST   | /v1/auth/register   | —    | Register a new user            |
 | POST   | /v1/auth/login      | —    | Authenticate and receive a JWT |
-| GET    | /v1/users/:id       | JWT  | Get user profile by ID         |
-| PUT    | /v1/users/:id       | JWT  | Update user profile            |
-| DELETE | /v1/users/:id       | JWT  | Delete user account            |
+| GET    | /v1/users/:id       | JWT  | Get user profile by ID          |
+| PUT    | /v1/users/:id       | JWT  | Update user profile             |
+| DELETE | /v1/users/:id       | JWT  | Delete user account             |
+
+`GET /v1/users/:id` honours the caller's `Cache-Control`: `no-cache` skips the cached copy,
+fetches from the store, and overwrites the entry (bypass **and** refresh — the header is a repair
+tool, so the repair sticks). Writes never read the header: a write always invalidates.
 
 Full API contract: [docs/architecture/api-contracts.md](../../docs/architecture/api-contracts.md)
 
@@ -25,6 +29,7 @@ Full API contract: [docs/architecture/api-contracts.md](../../docs/architecture/
 - JSON Web Tokens (JWT) for authentication, verified by a global guard
 - [@tw/tracing](../../libs/tw-tracing/README.md) + [@tw/logger](../../libs/tw-logger/README.md) for
   distributed tracing
+- [@tw/cache](../../libs/tw-cache/README.md) — this service **owns** the `user` cache entries
 - In-memory store (demo; swap for a real DB in production)
 
 This service is a **leaf**: it calls no other service, so it does not depend on
@@ -74,6 +79,35 @@ How to use it when something breaks: [Tracing a Request](../../docs/guides/traci
 
 ---
 
+## Shared cache: the owner role
+
+This is the service other services cache *about*: it owns the `user` entries in the shared cache
+(keys `users-service_user_<id>`, built only by `cacheKey('user', id)`).
+
+- **Reads go through `ReadThroughService`** — cache-aside, single-flight, negative caching — so
+  the second request for the same user costs no lookup, and concurrent cold requests cost one.
+- **Every write invalidates**, in `setImmediate`, never gated on any header. The `del` count is
+  logged at debug on every invalidation: a count of zero is the only visible symptom of an
+  invalidation built against a key no read ever used.
+- **Consumers read these keys directly** (products-service does) and never write them; the cache
+  server's ACL denies it even if a bug tries.
+
+```bash
+curl -s http://localhost:4001/health
+# { "status": "ok", "service": "users-service",
+#   "cache": { "store": "memory", "disabled": false, "hits": 4, "misses": 2, "skipped": 0 } }
+```
+
+`store: "memory"` locally means the in-process fallback (nothing shared — the boot log says so);
+in the cluster it is `"redis"`. `skipped` apart from `misses` is how a health check tells a cold
+cache from a dead one.
+
+The design and its failure policy: [Shared Cache](../../docs/architecture/shared-cache.md).
+When an entry looks stale or a consumer misses forever:
+[Debugging the Cache](../../docs/guides/debugging-the-cache.md).
+
+---
+
 ## Development
 
 ```bash
@@ -92,3 +126,5 @@ Copy `.env.example` to `.env` for local overrides.
 | LOGGER_LEVEL             | info            | `error`…`verbose`. `verbose` also logs masked request bodies                                      |
 | LOGGER_FORMAT            | json            | `pretty` for local terminals only                    |
 | LOGGER_REQUEST_LOGGING   | follows level   | `off`, `compact`, `full`                             |
+| CACHE_URL                | unset           | Shared cache server, `redis://…`. Unset → in-process store (nothing shared) |
+| CACHE_TTL                | 60              | Entry TTL in seconds — the only TTL unit             |

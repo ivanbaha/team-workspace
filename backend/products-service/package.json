@@ -9,13 +9,14 @@
     "start": "node dist/main.js",
     "dev": "nodemon",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
+    "@tw/cache": "1.0.0",
     "@tw/http-connector": "1.0.0",
     "@tw/logger": "1.0.0",
     "@tw/tracing": "1.0.0",

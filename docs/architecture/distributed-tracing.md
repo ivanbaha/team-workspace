@@ -6,16 +6,16 @@ How a request is followed across every service it touches, without a tracing sta
 
 ## The one-paragraph version
 
-A request carries a single ULID in an HTTP header called `x-trace-id`, and every service says who it
-is in `user-agent`. Every service logs both as fields in a one-line JSON record written to stdout. The container runtime already captures stdout; a
-node-level log shipper already forwards it; the log store already indexes the pod labels. So
-correlating one request across a dozen services is one query — and because the header is inherited
-automatically through NestJS request-scoped dependency injection, application developers write no
-correlation code at all.
+A request carries a single ULID in an HTTP header called `x-trace-id`, and every service says
+who it is in `user-agent`. Every service logs both as fields in a one-line JSON record written
+to stdout. The container runtime already captures stdout; a node-level log shipper already
+forwards it; the log store already indexes the pod labels. So correlating one request across a
+dozen services is one query — and because the header is inherited automatically through NestJS
+request-scoped dependency injection, application developers write no correlation code at all.
 
-The total application-side implementation is two headers, one middleware that seeds the first, and
-two thin request-scoped wrapper providers: a logger and an HTTP connector. There is no tracing SDK, no span
-context, no exporter, and nothing running next to the application process.
+The total application-side implementation is two headers, one middleware that seeds the first,
+and two thin request-scoped wrapper providers: a logger and an HTTP connector. There is no
+tracing SDK, no span context, no exporter, and nothing running next to the application process.
 
 That is the whole architecture, and it is complete as described. The
 [agent tooling](#the-tooling-you-can-cheaply-build-on-top) at the end is something we chose to build
@@ -37,7 +37,7 @@ This is the part that is easy to get half-right, because half of it fails loudly
 not.
 
 | Header | What it does | What happens when it is missing |
-|---|---|---|
+| --- | --- | --- |
 | `x-trace-id` | **Groups** every log line belonging to one request | The lines are unfindable. Obvious the first time you look for them |
 | `user-agent` | **Connects** them — the receiving service records it as `caller`, and `caller` is the only edge information a trace has | The lines are all there and every one of them is correct. There is simply no call graph, and the service shows up as an orphaned root |
 
@@ -55,7 +55,7 @@ call, both delete any other casing variant of themselves first, neither can be s
 ### The trace id
 
 | Property | Value | Source |
-|---|---|---|
+| --- | --- | --- |
 | Wire format | HTTP header `x-trace-id` (lowercase) | `libs/tw-tracing/src/constants.ts` |
 | Value format | **any non-empty string**, capped at 128 chars inbound — a ULID at HTTP entry points, service-built elsewhere | `ulidx` |
 | Example | `01M0J6EYRY4TFEPR9PHJZ1QHPF` | |
@@ -66,7 +66,7 @@ call, both delete any other casing variant of themselves first, neither can be s
 ### The identity
 
 | Property | Value | Source |
-|---|---|---|
+| --- | --- | --- |
 | Wire format | HTTP header `user-agent` | `libs/tw-http-connector/src/constants/index.ts` |
 | Value | the service's own name — **must equal `DEPLOYMENT_NAME`** | `HttpConnectionModule.forRoot({ userAgent })` |
 | Example | `products-service` | |
@@ -78,7 +78,7 @@ call, both delete any other casing variant of themselves first, neither can be s
 inbound request builds its own id, and all of these are legitimate:
 
 | Trace-Id | Minted by |
-|---|---|
+| --- | --- |
 | `01M0J6EYRY4TFEPR9PHJZ1QHPF` | `newTraceId()` at an HTTP entry point |
 | `01M0J6EYRY4TFEPR9PHJZ1QHPF-page-3` | a paginated sync run, `deriveTraceId(sessionId, 'page', page)` |
 | `01M0J6EYRY4TFEPR9PHJZ1QHPF-chunk-2` | a parallel fan-out |
@@ -268,7 +268,7 @@ host serving its API under the same domain) needs neither, which is exactly why 
 production and not locally:
 
 | Header on the API response | Without it |
-|---|---|
+| --- | --- |
 | `Access-Control-Allow-Headers: x-trace-id` | The preflight fails and **the request never happens** — loud, and caught immediately |
 | `Access-Control-Expose-Headers: x-trace-id` | The request succeeds and `response.headers.get('x-trace-id')` returns `null`. The echo from `traceIdMiddleware` is invisible to the page, so the id never reaches a bug report — silent |
 
@@ -299,14 +299,14 @@ here are **production behaviour the demo does not exercise**, and it is worth kn
 because a reader who assumes otherwise will go looking for code that is not here.
 
 | Behaviour | In production | In this repo |
-|---|---|---|
+| --- | --- | --- |
 | **Frontend-minted ids** | The browser mints the id; every trace starts there | The [interceptor](../../frontend/host-frontend/src/tracing/install-trace-interceptor.js) is real code and the host installs it — but the demo frontends are illustrative scaffolds with no dependencies and **no API calls at all**, so nothing is intercepted. In practice **demo traces start at the backend** |
 | **Gateway-minted ids** | Non-browser traffic gets an id at the gateway, in a format that distinguishes it from frontend traffic | Absent. `traceIdMiddleware` seeds anything that arrives without an id, so a demo request from `curl` is minted by the first service |
-| **Scheduled work with derived ids** | Sync jobs mint a session id and `deriveTraceId` per page and per chunk | The pattern is [documented](#4-the-manual-fallback) and `deriveTraceId` is implemented and tested, but no demo job exercises it. Adding one needs a scheduler dependency the demo does not carry |
+| **Scheduled work with derived ids** | Sync jobs mint a session id and `deriveTraceId` per page and per chunk | **Present here too** — the products-sync-service batch drain mints one root id per run and derives one id per category (`RecalculationsService.drain`), so a batch reads as one trace family in the logs. Triggered by accepted work rather than a cron tick, so no scheduler dependency is carried |
 | **Context auto-extraction** | Derived from the call stack when omitted | **Present here too** — `detectCaller()` is wired into `logger.service.ts` and runs whenever `context` is omitted. The demo services pass explicit contexts because that is the recommendation, not because the fallback is missing |
 
-The first three are simplifications. The fourth is in the repo; it is listed because it is easy to
-conclude from the service code that it is not.
+The first two are simplifications. The third and fourth are in the repo; they are listed because
+a reader skimming only the request-handling services would not find them.
 
 ---
 
@@ -315,7 +315,7 @@ conclude from the service code that it is not.
 Three packages, and the split between them is the design:
 
 | Package | Role | Size |
-|---|---|---|
+| --- | --- | --- |
 | [@tw/tracing](../../libs/tw-tracing/README.md) | The contract: header name, id format, the seed | 88 lines |
 | [@tw/logger](../../libs/tw-logger/README.md) | Writes the id into every log line; emits the request/response pair | 587 lines |
 | [@tw/http-connector](../../libs/tw-http-connector/README.md) | Carries the id to the next service | 386 lines |
@@ -452,7 +452,7 @@ and only the paper-thin scope-aware wrapper is instantiated per request.
 scales:
 
 | Wrapper | Singleton token | Package |
-|---|---|---|
+| --- | --- | --- |
 | `RequestScopedLoggerService` | `BASE_LOGGER` | `@tw/logger` |
 | `RequestScopedHttpConnectionService` | `BASE_HTTP_CONNECTOR` | `@tw/http-connector` |
 
@@ -543,7 +543,7 @@ calls it "a workaround, not a fix" — an entry there means a chain that only re
 holding this tool.
 
 | | `HttpConnectionService` | `RequestScopedHttpConnectionService` |
-|---|---|---|
+| --- | --- | --- |
 | DI scope | singleton | request-scoped (implicit, via `@Inject(REQUEST)`) |
 | Trace id | `params.traceId`, else an `x-trace-id` in `params.headers`. **Never ambient** | inherited from the inbound request unless overridden |
 | Does the work | yes — fetch, retry, timeout, parsing, error mapping | no — assembles headers, then delegates |
@@ -576,7 +576,7 @@ For an async broker, persist the id **in the message payload**. The two halves o
 behave differently, and this is the clarifying detail:
 
 | Leg | Context available? | Mechanism |
-|---|---|---|
+| --- | --- | --- |
 | **Publish** — service → broker | yes, still inside the originating request | automatic, via the request-scoped connector |
 | **Delivery** — broker → subscriber | no, the request returned long ago | manual: read the id back out of the payload |
 
@@ -594,7 +594,7 @@ emitted by `libs/tw-logger/src/request-logging.interceptor.ts`, auto-registered 
 ```
 
 | `direction` | Written by | Means |
-|---|---|---|
+| --- | --- | --- |
 | `request.in` | the request-logging interceptor | a request arrived at this service |
 | `response.out` | the request-logging interceptor | this service answered it |
 | `request.out` | `@tw/http-connector` | this service called someone else |
@@ -684,7 +684,7 @@ That single query *is* the distributed trace lookup.
 ## What a developer has to do
 
 | To get | You do |
-|---|---|
+| --- | --- |
 | A trace id on the very first hop | install the `fetch` interceptor once, in the host frontend |
 | A trace id on every inbound request | `TracingModule.forRoot()` — one import |
 | An edge from this service to the ones it calls | `HttpConnectionModule.forRoot({ userAgent: DEPLOYMENT_NAME })` — required, and it throws without it |
@@ -737,7 +737,7 @@ That is the whole developer contract. **No** span creation, no context managers,
 ### The trade-offs, stated fairly
 
 | | Trace-Id + Loki | OpenTelemetry tracing |
-|---|---|---|
+| --- | --- | --- |
 | Application code | header + log field; nothing per-call | SDK, propagators, spans (auto-instrumentation reduces this) |
 | Per-call identity | **none** — one flat id for the whole request | span id + parent span id |
 | Parent/child edges | **inferred** from forwarded `user-agent` + timestamps | explicit and exact |
@@ -770,7 +770,7 @@ in any service's dependency tree; deleting it tomorrow would not affect a single
 change one line of application code.
 
 | Piece | What it does |
-|---|---|
+| --- | --- |
 | `trace/parse.js` | Loki lines → typed events. Three log shapes tolerated |
 | `trace/spans.js` | Pairs `request.in`/`response.out` into spans; builds edges, the call tree, coverage |
 | `trace/render.js` | Mermaid sequence diagram + Markdown report |
@@ -863,7 +863,7 @@ here are ours because they suited our system, and they are the first things to r
 than inherit:
 
 | Ours | Change it when |
-|---|---|
+| --- | --- |
 | `user-agent` carries the caller identity | A mesh or gateway rewrites it, you need per-client attribution the UA cannot express, or you want the edge stated by the caller instead of inferred. Add a dedicated header, or log the caller's own outbound record — nothing else in the design depends on it being `user-agent` |
 | A ULID minted per HTTP call | Your debugging starts from something else — a session, a job, a UI action. The id is any non-empty string, so use the identifier your system already reasons about |
 | `x-trace-id` as the header name | It collides with something, or a platform you sit behind already propagates its own |

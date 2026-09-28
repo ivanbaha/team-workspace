@@ -11,6 +11,8 @@ and deployment lifecycle.
   tokens, and profile data. Port 4001
 - [products-service](./products-service/README.md) — REST API managing product catalogue, inventory,
   and pricing. Port 4002. Calls users-service to resolve product owners
+- [products-sync-service](./products-sync-service/README.md) — background worker recomputing
+  per-category aggregates through the shared cache's work queue. Port 4003
 
 The exact service name matters: `DEPLOYMENT_NAME`, the container name, the `serviceName` in every
 log line, and the outbound `User-Agent` are all the same string. Use the names above verbatim when
@@ -54,17 +56,47 @@ After that, no application code mentions a trace id.
 
 ---
 
+## Shared cache
+
+Every service above talks to one shared cache server, in one of three roles — and a service can
+hold more than one: **owner** (the only writer of its entities — users-service for users,
+products-service for products, product lists and the catalog composite), **consumer** (reads
+another owner's entries directly — products-service reads users), **operator** (runs the work
+queue and the batch lock, products-sync-service).
+Adoption is one import:
+
+```ts
+imports: [
+  CacheModule.forRoot({
+    url: process.env.CACHE_URL,                       // unset → in-process store, nothing shared
+    ttlSeconds: Number(process.env.CACHE_TTL ?? 60),  // seconds; the only TTL unit
+    logger: { provide: CACHE_LOGGER, useExisting: LoggerService },
+  }),
+]
+```
+
+After that, no service decides its own failure policy — the library's is the contract: reads fail
+open when the cache is broken, queue writes fail closed, invalid arguments throw.
+
+- **How it works and why:** [Shared Cache](../docs/architecture/shared-cache.md)
+- **How to use it when something breaks:**
+  [Debugging the Cache](../docs/guides/debugging-the-cache.md)
+- **The library:** [@tw/cache](../libs/tw-cache/README.md)
+
+---
+
 ## Development
 
 ```bash
 # From workspace root
 yarn install
-yarn build:libs       # the tracing libs are TypeScript; services consume their dist/
+yarn build:libs       # the shared libs are TypeScript; services consume their dist/
 yarn dev:users-be
 yarn dev:products-be
+yarn dev:sync
 ```
 
-Run both to exercise the cross-service call:
+Run the first two to exercise the cross-service call:
 
 ```bash
 curl "http://localhost:4002/v1/products?expandOwner=true" \

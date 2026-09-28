@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cache-acl
+  labels:
+    app.kubernetes.io/name: cache
+    app.kubernetes.io/part-of: team-workspace
+data:
+  # The ACL file mounted at /etc/valkey/acl/users.acl. One `user` line per cache
+  # participant, each scoped to the key pattern it may touch:
+  #
+  #   users-service          owns `users-service_user_*`          — reads AND writes its own
+  #     prefix. Only the owner writes an owner's keys: only it knows what a fresh
+  #     value is, and its own invalidations are what keep the entries honest.
+  #     One prefix, one rule set: a flat line is correct here.
+  #
+  #   products-service       owner AND consumer — the one user that needs TWO rule
+  #     sets, because its read and write scopes are different keys. A flat ACL
+  #     line cannot express that: commands on one line apply to EVERY key pattern
+  #     on the line, so `~users-service_* ~products-service_* +@read +@write`
+  #     grants products-service write access to the owner's prefix (verified:
+  #     `SET users-service_user_1` succeeds — exactly the bug this file exists to
+  #     prevent). Selectors fix it: each parenthesised rule set pairs its own
+  #     commands with its own patterns. The first — read-write on its own
+  #     `products-service_*` (product, productList and req entries; an owner must
+  #     be able to invalidate what it owns). The second — READ-only on
+  #     `users-service_*`, the owner's prefix: a hit there skips the HTTP hop, and
+  #     a consumer bug that tries to write is refused by the server
+  #     (verified: `SET`/`DEL` → NOPERM, `GET` → allowed).
+  #
+  #   products-sync-service  owns `products-sync-service_*` — its category-stats
+  #     entries AND its queue and lock keys, which share the same prefix and are
+  #     therefore covered by the same rule. One prefix, one rule set: flat.
+  #
+  #   default is OFF. No unauthenticated access, and no shared credential with
+  #     every permission — each service authenticates as itself, and what it can
+  #     do is on one readable line.
+  #
+  # Command grants, per user:
+  #   +@connection  AUTH/HELLO/PING — without it the client cannot authenticate at all
+  #   +@read        GET, SPOP, SCARD … (consumers get read only)
+  #   +@write       SET, DEL, SADD …   (DEL is a write: invalidation must work)
+  #   -@dangerous   FLUSHALL, FLUSHDB, CONFIG … — no cache participant has any
+  #                 business wiping the cache, under any credential
+  #
+  # The passwords below are the placeholder values from the `cache-credentials`
+  # Secret, in cleartext form. Rotate by changing both files together (or switch
+  # the ACL to hashed `#bcrypt` form and manage the Secret alone).
+  users.acl: |
+    user default off
+    user users-service on >users-service-CHANGE-ME ~users-service_* +@read +@write +@connection -@dangerous
+    user products-service on >products-service-CHANGE-ME (~products-service_* +@read +@write +@connection -@dangerous) (~users-service_* +@read +@connection -@dangerous)
+    user products-sync-service on >products-sync-service-CHANGE-ME ~products-sync-service_* +@read +@write +@connection -@dangerous

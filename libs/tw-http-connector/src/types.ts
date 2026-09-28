@@ -82,7 +82,7 @@ export interface IHttpConnectionOptions {
    * the same header the connector writes its own into — the caller's `Mozilla/5.0…` competing with
    * this service's identity — and correlation cannot be switched off by reconfiguring forwarding.
    *
-   * @default ['accept-language']
+   * @default ['accept-language', 'cache-control']
    */
   forwardHeaders?: string[];
 
@@ -119,7 +119,7 @@ export interface HttpConnectionAsyncMetadata extends Pick<ModuleMetadata, 'impor
 export class HttpConnectionOptions implements IHttpConnectionOptions {
   logger!: IHttpConnectionOptions['logger'];
   userAgent!: string;
-  forwardHeaders: string[] = ['accept-language'];
+  forwardHeaders: string[] = ['accept-language', 'cache-control'];
   retry = true;
   retryAttempts = 2;
   retryDelay = 300;

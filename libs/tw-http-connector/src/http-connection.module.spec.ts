@@ -49,4 +49,14 @@ describe('HttpConnectionModule.forRoot', () => {
 
     expect(options.forwardHeaders).toEqual(['accept-language', 'authorization']);
   });
+
+  it('forwards cache-control by default, so a freshness demand survives the first hop', () => {
+    // A `no-cache` belongs to the caller, not to whichever service sits on the first internal
+    // hop. Without the default, the connector drops it and every service after that hop serves
+    // from its cache while the header looks honoured.
+    expect(resolvedOptions({ userAgent: 'orders-service', logger }).forwardHeaders).toEqual([
+      'accept-language',
+      'cache-control',
+    ]);
+  });
 });

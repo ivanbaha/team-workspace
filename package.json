@@ -17,8 +17,8 @@
     "skills:sync": "node scripts/sync-skill-wrappers.mjs",
     "skills:check": "node scripts/sync-skill-wrappers.mjs --check",
     "agents:check": "yarn rules:check && yarn skills:check",
-    "build:libs": "yarn workspace @tw/tracing build && yarn workspace @tw/logger build && yarn workspace @tw/http-connector build",
-    "test:libs": "yarn workspace @tw/tracing test && yarn workspace @tw/logger test && yarn workspace @tw/http-connector test",
+    "build:libs": "yarn workspace @tw/tracing build && yarn workspace @tw/logger build && yarn workspace @tw/http-connector build && yarn workspace @tw/cache build",
+    "test:libs": "yarn workspace @tw/tracing test && yarn workspace @tw/logger test && yarn workspace @tw/http-connector test && yarn workspace @tw/cache test",
     "daily-setup": "node scripts/daily-setup-guard.mjs",
     "gitops:versions": "node .ai/skills/release-mr/scripts/read-versions.mjs --all",
     "gitops:validate": "node .ai/skills/release-mr/scripts/validate-overlays.mjs",
@@ -33,6 +33,7 @@
     "dev:products-fe": "yarn workspace products-frontend dev",
     "dev:users-be": "yarn workspace users-service dev",
     "dev:products-be": "yarn workspace products-service dev",
+    "dev:sync": "yarn workspace products-sync-service dev",
     "lint": "yarn workspaces run lint",
     "build": "yarn workspaces run build"
   },

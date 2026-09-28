@@ -161,11 +161,20 @@ in a runtime guard — a destination allowlist would have to track service URLs 
 environment, and its failure mode is worse than the one it prevents: a misconfigured origin drops
 `authorization` silently and produces 401s that look like an auth bug, in production only.
 
-`forwardHeaders` (default `['accept-language']`) copies chosen inbound headers onto outbound calls.
-**Neither contract header may appear on that list, and `forRoot()` throws if one does.** Both have a
-dedicated path, so forwarding one as well would put the inbound value — the browser's
-`Mozilla/5.0…` — in the same header the connector writes its own into, and no reconfiguration of
-header forwarding can silently switch tracing off.
+`forwardHeaders` (default `['accept-language', 'cache-control']`) copies chosen inbound headers onto
+outbound calls. **Neither contract header may appear on that list, and `forRoot()` throws if one
+does.** Both have a dedicated path, so forwarding one as well would put the inbound value — the
+browser's `Mozilla/5.0…` — in the same header the connector writes its own into, and no
+reconfiguration of header forwarding can silently switch tracing off.
+
+`cache-control` is on the default list for the same reason `accept-language` is: the request is not
+the same request without it. A `no-cache` from a caller means "do not serve me a cached copy", and
+the demand belongs to the caller — not to whichever service happens to sit on the first internal
+hop — so the connector carries it to the end of the chain and each caching service on the way
+honours it ([`@tw/cache`](../tw-cache/README.md) implements the semantics: bypass the cached read,
+fetch from the source, overwrite the entry). Unlike `authorization`, it is not a credential: a third
+party receiving it can only answer more freshly, which is not a leak, and a service that caches
+nothing ignores it, which costs nothing.
 
 ---
 

@@ -12,6 +12,10 @@ kind: Kustomization
 resources:
   - users-service
   - products-service
+  - products-sync-service
+  # The shared cache the three services above talk to. Listed after them only for
+  # readability — kustomize resources are unordered.
+  - cache
   - host-frontend
   - users-frontend
   - products-frontend

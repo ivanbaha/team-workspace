@@ -18,6 +18,16 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: products-sync-service
+spec:
+  # Two, not four: the batch lock already collapses concurrent requests into one
+  # drain per queue, and SPOP hands each category to exactly one drain — so extra
+  # replicas buy availability, not throughput.
+  replicas: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: host-frontend
 spec:
   replicas: 3

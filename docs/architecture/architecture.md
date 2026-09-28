@@ -6,7 +6,7 @@ High-level overview of the system architecture.
 
 ## System Boundaries
 
-```
+```txt
 Browser
   |
   v
@@ -18,6 +18,9 @@ host-frontend (port 3000)
   +-- calls --> products-service (port 4002) — REST API (NestJS)
                      |
                      +-- calls --> users-service  (resolve product owners)
+
+users-service, products-service, products-sync-service (port 4003)
+  `-- read / write --> shared cache (valkey, port 6379) — one server, three roles
 ```
 
 Every arrow above carries the same `x-trace-id` header — see
@@ -48,10 +51,17 @@ Each microfrontend:
 
 ## Data Flow
 
-User authentication is handled exclusively by `users-service`. On login, a JWT is issued and stored by the host app in its Redux auth slice. All subsequent requests to any service include the JWT in the `Authorization: Bearer <token>` header.
+User authentication is handled exclusively by `users-service`. On login, a JWT is issued and
+stored by the host app in its Redux auth slice. All subsequent requests to any service include
+the JWT in the `Authorization: Bearer <token>` header.
 
 `products-service` calls `users-service` to resolve product owners (`?expandOwner=true`). That is
-the workspace's one service-to-service hop, and it is where propagation is easiest to observe.
+the workspace's request-to-request hop, and it is where propagation is easiest to observe.
+
+`products-sync-service` recomputes per-category aggregates in the background: accepted work waits
+in a Redis Set on the shared cache (the set is the queue), a `SET NX` lock bounds one drain at a
+time, and the drain calls products-service outside any request — with a derived trace id per
+category and a service token of its own. See [Shared Cache](./shared-cache.md).
 
 ---
 
@@ -77,4 +87,5 @@ trace id.
 
 ## Deployment
 
-All services are containerised (Docker) and deployed to Kubernetes. Infrastructure and deployment configuration lives in [infra](../../infra/README.md).
+All services are containerised (Docker) and deployed to Kubernetes. Infrastructure and
+deployment configuration lives in [infra](../../infra/README.md).

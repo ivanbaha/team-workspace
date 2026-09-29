@@ -82,13 +82,18 @@ How to use it when something breaks: [Tracing a Request](../../docs/guides/traci
 ## Shared cache: the owner role
 
 This is the service other services cache *about*: it owns the `user` entries in the shared cache
-(keys `users-service_user_<id>`, built only by `cacheKey('user', id)`).
+(keys `users-service_user_<id>`, built only by the registry — `cacheKeyOrNull('user', id)`).
 
 - **Reads go through `ReadThroughService`** — cache-aside, single-flight, negative caching — so
-  the second request for the same user costs no lookup, and concurrent cold requests cost one.
-- **Every write invalidates**, in `setImmediate`, never gated on any header. The `del` count is
-  logged at debug on every invalidation: a count of zero is the only visible symptom of an
-  invalidation built against a key no read ever used.
+  the second request for the same user costs no lookup, and concurrent cold requests on one pod
+  cost one. An id that is not already canonical (`/v1/users/%201`) cannot form a key: it is
+  answered from the store, uncached, and can never write user 1's entry.
+- **Every write invalidates**, in `setImmediate`, never gated on any header — and every write goes
+  through `UsersService`, registration included (`AuthService.register` calls
+  `UsersService.create`). A write path outside it would be a write the cache never hears about:
+  a 404 cached for the next id would outlive the registration that created it.
+- **The `del` count is logged at debug** on every invalidation — a debugging aid: after a read that
+  filled the key, `removed 0` means the invalidation used a different key than the read.
 - **Consumers read these keys directly** (products-service does) and never write them; the cache
   server's ACL denies it even if a bug tries.
 

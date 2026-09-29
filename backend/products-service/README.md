@@ -86,19 +86,28 @@ through the shared cache first, HTTP second:
    A hit costs one cache round trip instead of one HTTP hop — no trace fan-out, no call to
    users-service — and honours the owner's negative entries ("this user does not exist") too.
 2. On a miss, the connector calls users-service; the owner's read-through fills the entry as a
-   side effect, so the next consumer read is a hit.
+   side effect, so the next consumer read is a hit. An owner id that cannot form a key (it came
+   from a request body, after all) skips the cache read and goes straight to users-service,
+   URL-encoded — it never fails the catalog.
 3. This service **never writes** the owner's keys — only the owner knows what a fresh value is.
-   The cache server's ACL enforces it: this service's user may write only its own prefix, and the
-   owner's keys are read-only to it.
+   The cache server's ACL enforces it: this service's user may write only its own prefix, and it
+   may read only the owner's `user` entries.
 
 As an **owner**, it caches its own data at three rungs of the ladder:
 
 | Read shape | Key | Invalidation |
 | --- | --- | --- |
-| `GET /v1/products/:id` | `products-service_product_<id>` | the item's key, on every write to it — including a negative entry the day its id is re-created |
-| `GET /v1/products`, `?category=` | `products-service_productList_all` / `_<category>` | **every** write to **any** product kills **every** list shape — one `delMany`, deliberately blunt |
+| `GET /v1/products/:id` | `products-service_product_<id>` | the item's key, on every write to it — including a negative entry the day its id is created |
+| `GET /v1/products`, `?category=` | `products-service_productList_all` / `_category.<name>` | **every** write to **any** product kills **every** list shape — one `delMany`, deliberately blunt |
 | `GET /v1/products?expandOwner=true` (no filters) | `products-service_req_v1-products_expandowner=true` | this service's writes kill it like any local shape (it can name the key); the TTL bounds the *owner entries users-service contributed* — the half no product write can reach |
 | `GET /v1/products?search=…` | — | never cached: free text cannot form a key space anyone can enumerate |
+
+Every key is built from exactly the value the loader filters on. An id or category that is not
+already canonical — ` 1`, `Widgets`, `Home & Garden` — cannot form a key, so that request is
+served from the store, uncached, and can never write the entry of the value it resembles. The
+`category.` prefix does the same for the synthetic shape: `?category=all` is its own shape, not a
+way to overwrite the unfiltered list. Writes never fail because of a key: invalidation is built
+after the response, and a shape that cannot form a key has no entry to delete.
 
 The blunt list rule is the point, not a shortcut: the membership-vs-content split of "smarter"
 list caching buys one store read per write window and costs invalidation branches that can be
@@ -106,8 +115,10 @@ gotten wrong. `[]` is a valid cached value — "no products in this category" is
 "this product does not exist", which the next write can change.
 
 A caller sending `Cache-Control: no-cache` bypasses whichever rung served the request and
-refreshes it, and the connector forwards the header to users-service, which does the
-bypass-and-refresh on its side. The demand is the caller's; it survives every hop.
+refreshes it — on the composite, the owner lookups it is built from as well — and the connector
+forwards the header to users-service, which does the bypass-and-refresh on its side. The demand
+is the caller's; it survives every hop. Who may send it is an edge decision: see
+[API Contracts](../../docs/architecture/api-contracts.md).
 
 Locally, with no `CACHE_URL`, both services run in-process stores and step 1 never hits —
 start a real cache server to see the sharing (the
@@ -138,4 +149,4 @@ yarn dev:products-be  # starts on port 4002 with nodemon + ts-node
 | LOGGER_REQUEST_LOGGING | follows level         | `off`, `compact`, `full`                          |
 | CACHE_URL              | unset                 | Shared cache server, `redis://…`. Read-write user scoped to this service's prefix in the cluster |
 | CACHE_TTL              | 60                    | Entity and list entry TTL in seconds — the only TTL unit |
-| REQUEST_CACHE_TTL      | 10                    | Composite request cache TTL in seconds — its only invalidation |
+| REQUEST_CACHE_TTL      | 10                    | Composite request cache TTL in seconds — bounds the part local writes cannot invalidate; checked at boot |

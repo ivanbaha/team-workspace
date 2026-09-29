@@ -124,13 +124,20 @@ enforces in code:
 
 | Flag | Why |
 | --- | --- |
-| `--maxmemory 200mb --maxmemory-policy volatile-lru` | A full cache evicts the least recently used entry **among the TTL-carrying keys** — every entity, list and composite entry. The no-TTL keys (the work-queue set) are never evicted: an evicted queued id is a recomputation that silently never runs. Every evictable entry is reconstructable (a miss reloads it), so eviction degrades latency, never correctness. |
-| `--save "" --appendonly no` | Persistence OFF, both kinds. A cache restart that resurrects yesterday's entries serves ghosts — entries the owners invalidated or rewrote since, replayed as if nothing happened. Empty-and-rebuild is the correct cold start for a cache. |
-| `--aclfile /etc/valkey/acl/users.acl` | One user per participating service, each scoped to the key pattern it may touch. The owner writes its own prefix; a consumer is read-only **on the owner's prefix** — the server refuses a consumer's write even if the code has a bug that tries. `default` is off. |
+| `--maxmemory 200mb --maxmemory-policy volatile-lru` | A full cache evicts the least recently used entry **among the TTL-carrying keys** — every entity, list and composite entry, and the batch lock. The no-TTL keys (the work-queue set) are never evicted: an evicted queued id is a recomputation that silently never runs. That makes the queue the one thing that cannot be shed, so it is capped where work enters it (`MAX_QUEUE_SIZE`, and a validated, size-limited POST). Every evictable entry is reconstructable (a miss reloads it), so eviction degrades latency, never correctness. |
+| `--save "" --appendonly no` | Persistence OFF, both kinds. A cache restart that resurrects yesterday's entries serves ghosts — entries the owners invalidated or rewrote since, replayed as if nothing happened. Empty-and-rebuild is the correct cold start for a cache. The price: a restart also drops the work queue, and re-POSTing is the recovery. |
+| `--aclfile /etc/valkey/acl/users.acl` | One user per participating service, each scoped to the key pattern it may touch. The owner writes its own prefix; a consumer is read-only **on the entity it consumes** (`~users-service_user_*`) — the server refuses a consumer's write even if the code has a bug that tries. `default` is off; keyless enumeration (`SCAN`, `RANDOMKEY`) is refused to every service user. |
+
+Two more decisions live outside the flags: `strategy: Recreate`, because a rolling update would
+briefly run two independent caches behind one Service, and a memory request equal to the limit,
+because a pod using more than it requested is an early eviction target — and evicting this one
+empties the cache and the queue.
 
 The credentials are **placeholder values committed on purpose** — this repository is a curated
-example; a real deployment sources them from a secret manager, and the ACL file and the
-`cache-credentials` Secret must rotate together.
+example; a real deployment sources them from a secret manager. The ACL file holds only SHA-256
+hashes of the passwords in the `cache-credentials` Secret, so the two rotate together — and the
+server reads the ACL file at startup only, so a rotation lands with the next restart of the cache
+pod.
 
 Each participating service's deployment carries the same pair, and the same rule:
 

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { NEGATIVE_CACHE_SENTINEL, CacheService, cacheKey } from '@tw/cache';
+import { NEGATIVE_CACHE_SENTINEL, CacheService, cacheKeyOrNull } from '@tw/cache';
 import { RequestScopedHttpConnectionService } from '@tw/http-connector';
 import { RequestScopedLoggerService } from '@tw/logger';
 
@@ -57,8 +57,11 @@ export class UsersConnector {
    *   inconsistency worth logging, not a reason to fail the caller's request for a product.
    */
   async findOwner(ownerId: string, noCache: boolean): Promise<PublicUser | null> {
-    if (!noCache) {
-      const key = cacheKey('user', ownerId);
+    // The owner id is product data, and product data came from a request body: an id that cannot
+    // form a key never has an entry, so it skips the cache read and asks the owner — it must not
+    // turn every catalog request that includes this product into a 500.
+    const key = cacheKeyOrNull('user', ownerId);
+    if (!noCache && key) {
       // The sentinel type is on this read because the owner stores 'not_present' for a user it has
       // proven absent — honouring it is what keeps "owner does not exist" from being an HTTP call
       // every single time.
@@ -77,7 +80,9 @@ export class UsersConnector {
 
     try {
       const response = await this.http.connect<Envelope<PublicUser>>({
-        url: `${this.baseUrl}/v1/users/${ownerId}`,
+        // Encoded: the id is data, and an unencoded `../` in it would steer this call — carrying
+        // the caller's forwarded token — to a different users-service route.
+        url: `${this.baseUrl}/v1/users/${encodeURIComponent(ownerId)}`,
         method: 'GET',
       });
       return response.data;

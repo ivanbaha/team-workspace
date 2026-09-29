@@ -55,15 +55,26 @@ src/
 ## The work queue, the lock, and the two-connector pattern
 
 The queue is a Redis **Set** on the shared cache: `SADD` enqueues (duplicates collapse for free),
-`SPOP` drains atomically — two drains can never hand out the same category. The set is the durable
-half of the queue: it survives a crash of this service, and `onApplicationBootstrap` counts what it
-finds and schedules a drain, so work accepted seconds before a crash is finished after the restart.
+`SPOP` drains atomically — two drains can never hand out the same category. The set survives a
+crash of this service; it does **not** survive a restart of the cache server, which runs without
+persistence — work queued then is gone, and re-POSTing is the recovery.
 
-The batch lock is `SET NX EX`. It stops N accepted requests from scheduling N drains of one queue,
-and its TTL is the release — there is no unlock call, because a process that died between acquiring
-and draining must not block scheduling forever. Both fail **closed** on a cache outage: the POST
-answers `503 CACHE_UNAVAILABLE` and says that nothing was enqueued, rather than accepting work that
-was never stored. Reads fail open; writes never lie.
+The batch lock is `SET NX EX`. It stops N accepted requests from scheduling N drains of one queue.
+The drain deletes it when it finishes and checks the set once more, so work that arrived after the
+drain's last pop — while the lock was still held — gets a drain of its own; the TTL is the release
+only for a holder that died. Because every "schedule a drain" can still be lost (a crash between
+the lock and the timer, a cache outage, an evicted lock, a boot that ran before the cache client
+connected), a **reconcile pass** runs every `RECONCILE_INTERVAL_SECONDS`: queued ids with nothing
+scheduled get a drain. There is no one-off startup check — at bootstrap the cache client is still
+connecting, and the queue would read as empty.
+
+Enqueueing fails **closed**: when the cache cannot confirm the add, the POST answers
+`503 CACHE_UNAVAILABLE` and asks for a retry (safe — the set deduplicates), rather than accepting
+work that may not have been stored. The queue is also capped: category ids are validated with the
+cache key rule (canonical, at most 64 characters, at most 100 per request), and a POST that would
+take the queue past `MAX_QUEUE_SIZE` answers `503 QUEUE_FULL`. The set carries no TTL, so it is
+never evicted — and without the cap, a flood of ids would push every other service's entries out
+of the shared cache first. Reads fail open; writes never lie.
 
 The drain runs **outside request scope**, which is where the two-connector pattern splits:
 
@@ -127,5 +138,7 @@ curl -X POST localhost:4003/v1/recalculations \
 | CACHE_URL              | unset                 | Shared cache server, `redis://…`. Read-write user scoped to this service's prefix |
 | CACHE_TTL              | 300                   | Stats entry TTL in seconds — the only TTL unit    |
 | BATCH_DELAY_SECONDS    | 5                     | Delay before the batch drain runs                 |
-| LOCK_TTL_SECONDS       | 10                    | Scheduling-lock TTL; should cover the delay window |
+| LOCK_TTL_SECONDS       | 10                    | Scheduling-lock TTL; covers the delay window, and is the release only for a crashed holder |
 | BATCH_SIZE             | 100                   | Category ids per pop of the queue set             |
+| RECONCILE_INTERVAL_SECONDS | 30                | Seconds between passes that schedule a drain for queued ids nothing is draining |
+| MAX_QUEUE_SIZE         | 10000                 | Most ids the queue may hold; beyond it the POST answers `503 QUEUE_FULL` |

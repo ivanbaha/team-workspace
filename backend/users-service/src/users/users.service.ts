@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { CacheService, ReadThroughService, cacheKey, cacheKeyOrNull } from '@tw/cache';
+import { CacheService, ReadThroughService, cacheKeyOrNull } from '@tw/cache';
 import { RequestScopedLoggerService } from '@tw/logger';
-import { PublicUser, toPublicUser, users } from '../data/users.store';
+import { PublicUser, nextUserId, toPublicUser, users } from '../data/users.store';
 
+import type { User } from '../data/users.store';
 import type { UpdateUserDto } from './dto/update-user.dto';
 
 const CONTEXT = 'UsersService';
@@ -20,6 +21,10 @@ const CONTEXT = 'UsersService';
  * This service is the OWNER of the `user` cache entries: the only writer of its keys, and the one
  * that invalidates them after every write. Consumers read those keys directly (see the connector
  * in products-service), which is what makes a consumer hit cheaper than a call to this service.
+ *
+ * Every write to the users store goes through a method here — registration included — because
+ * invalidation is only as complete as the write paths that remember it. A second module writing
+ * the store directly is a write the cache never hears about.
  */
 @Injectable()
 export class UsersService {
@@ -30,9 +35,10 @@ export class UsersService {
   ) {}
 
   async findOne(id: string, noCache: boolean): Promise<PublicUser> {
-    // The id comes from the URL, so it is end-user input: one that cannot form a cache key
-    // (`/v1/users/foo%20bar`) reads as null and falls back to an uncached store read — the
-    // source of truth answers 404, instead of the cache layer answering 500.
+    // The id comes from the URL, so it is end-user input: one that cannot form a cache key —
+    // `/v1/users/foo%20bar`, or a non-canonical spelling like `/v1/users/%201` — reads as null and
+    // falls back to an uncached store read. The source of truth answers for exactly the id it was
+    // asked about, and user 1's entry is never written by a request that was not for user 1.
     const key = cacheKeyOrNull('user', id);
     const load = async () => {
       const found = users.find((candidate) => candidate.id === id);
@@ -56,6 +62,22 @@ export class UsersService {
     }
 
     return user;
+  }
+
+  /**
+   * Adds a user — the one way a user comes into existence, whichever module asks for it.
+   *
+   * The new id is invalidated like any other write: ids are sequential, so the next one is
+   * predictable, and a lookup for it before it existed has cached a 404 that would otherwise
+   * outlive the registration by up to the negative TTL — on every consumer, too.
+   */
+  create(fields: Omit<User, 'id'>): PublicUser {
+    const user: User = { id: nextUserId(), ...fields };
+    users.push(user);
+    this.logger.info(`Created user ${user.id}`, `${CONTEXT}.create`);
+    this.invalidateUser(user.id);
+
+    return toPublicUser(user);
   }
 
   update(id: string, changes: UpdateUserDto): PublicUser {
@@ -94,16 +116,18 @@ export class UsersService {
    * Never gated on the request's `Cache-Control` — the header says what *this caller* may read;
    * the write changes what *everyone* will read. `setImmediate` keeps the invalidation off the
    * response path: the caller does not wait on the cache, and no cache failure can fail the
-   * request that caused it.
+   * request that caused it. The key is built inside the callback for the same reason — the store
+   * write is already committed, and nothing about the cache may turn it into a 500.
    *
-   * The del count is logged every time because a `del` that removed nothing is the visible
-   * symptom of the worst cache bug there is — an invalidation built with a key no read ever
-   * used. Such a bug caches correctly forever and serves stale data forever; this debug line is
-   * the only witness, so it fires on the healthy path too, not only when someone is looking.
+   * The del count is logged every time as a debugging aid: after a read that filled the key, a
+   * `del` that removed nothing means the invalidation used a different key than the read. A `0`
+   * on its own is also what an uncached user gives, so read it next to the reader's key.
    */
   private invalidateUser(id: string): void {
-    const key = cacheKey('user', id);
     setImmediate(() => {
+      // An id that cannot form a key was never cached — every read of it went uncached.
+      const key = cacheKeyOrNull('user', id);
+      if (!key) return;
       void this.cache.del(key).then((removed) => {
         this.logger.debug(
           `Invalidation removed ${removed} cache entry for user ${id} (key ${key})`,

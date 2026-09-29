@@ -6,12 +6,22 @@ metadata:
     app.kubernetes.io/name: cache
     app.kubernetes.io/part-of: team-workspace
 spec:
-  # One replica on purpose. The cache holds nothing that survives a restart and
-  # nothing whose loss is a data incident: every entry is rebuilt from its owning
-  # service's source of truth on the next miss. Multi-replica shared caches need
-  # a coherence story between the replicas (or a server that shards for you);
-  # a single shared instance needs neither, which is the trade this example takes.
+  # One replica on purpose. The cache holds nothing that survives a restart:
+  # every entry is rebuilt from its owning service's source of truth on the next
+  # miss. The one exception is the recalculations queue, which a restart drops —
+  # its recovery is a re-POST (see Shared Cache in the docs). Multi-replica shared
+  # caches need a coherence story between the replicas (or a server that shards
+  # for you); a single shared instance needs neither, which is the trade this
+  # example takes.
   replicas: 1
+  # Recreate, not the default RollingUpdate. A rolling update starts the new pod
+  # before stopping the old one, and for the overlap two independent, unrelated
+  # caches sit behind one Service: a service that reconnects lands on the new,
+  # empty one while its neighbours still write and invalidate the old one, and
+  # whatever is queued on the old one goes when it stops. A short full outage is
+  # the failure this design already handles — reads fail open, queue writes 503.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: cache
@@ -38,9 +48,12 @@ spec:
             # is harmless: an evicted lock is an early release, and the design
             # treats the lock as a cost optimisation, not the correctness
             # mechanism. The trade this takes: if the no-TTL keys ever outgrew
-            # maxmemory the server could not evict them — the queue is bounded
-            # by the number of categories, so here that trade is a size
-            # requirement, not a risk.
+            # maxmemory the server could not evict them — it would first shed
+            # every service's entries, then refuse writes. So the queue is
+            # bounded where work enters it: the POST validates each id and caps
+            # a request at 100, and the service refuses work past
+            # MAX_QUEUE_SIZE. ACLs isolate who writes what; only caps like that
+            # one isolate how much memory a participant can take from the rest.
             - --maxmemory
             - 200mb
             - --maxmemory-policy
@@ -82,7 +95,10 @@ spec:
           resources:
             requests:
               cpu: 50m
-              memory: 64Mi
+              # Requested in full, not 64Mi: a pod using more memory than it
+              # requested is among the first the kubelet evicts under node
+              # pressure, and an eviction here empties the cache and the queue.
+              memory: 384Mi
             limits:
               # At or above maxmemory, or the server OOM-kills instead of evicting.
               memory: 384Mi

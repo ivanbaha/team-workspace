@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { RequestScopedLoggerService } from '@tw/logger';
 import * as jwt from 'jsonwebtoken';
-import { PublicUser, toPublicUser, users } from '../data/users.store';
+import { PublicUser, users } from '../data/users.store';
+import { UsersService } from '../users/users.service';
 
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
@@ -10,7 +11,10 @@ const CONTEXT = 'AuthService';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly logger: RequestScopedLoggerService) {}
+  constructor(
+    private readonly logger: RequestScopedLoggerService,
+    private readonly usersService: UsersService,
+  ) {}
 
   register({ name, email }: RegisterDto): PublicUser {
     if (users.some((candidate) => candidate.email === email)) {
@@ -20,11 +24,12 @@ export class AuthService {
       throw new BadRequestException({ code: 'EMAIL_TAKEN', message: 'Email already registered' });
     }
 
-    const user = { id: String(users.length + 1), name, email, passwordHash: 'hashed_pw' };
-    users.push(user);
+    // Through the owner's write path, not straight into the store: creating a user is a write the
+    // user cache has to hear about, and UsersService is where every such write invalidates.
+    const user = this.usersService.create({ name, email, passwordHash: 'hashed_pw' });
     this.logger.info(`Registered user ${user.id}`, `${CONTEXT}.register`);
 
-    return toPublicUser(user);
+    return user;
   }
 
   login({ email }: LoginDto): { token: string } {

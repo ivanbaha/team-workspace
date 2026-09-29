@@ -33,17 +33,20 @@ Everything below is one of those three, read correctly.
 | Symptom | What it almost always is | Do |
 | --- | --- | --- |
 | "The cache does nothing" — miss on every read | Services are not on the **same** cache: `store: "memory"` on `/health` means in-process, nothing shared | Point `CACHE_URL` at the same server for every participant — see [the local setup](#seeing-the-sharing-actually-happen) |
-| A stale answer once, then correct | Entry was written before the source changed; invalidation raced or the TTL has not passed | `Cache-Control: no-cache` — the repair is a header, and it sticks for the next reader |
-| Stale *every* time for one entity | Dead invalidation: the owner's `del` removed nothing | Find the `removed 0` line — see [reading the invalidation count](#the-invalid-count-line-is-the-only-witness-of-a-dead-invalidation) |
+| A stale answer once, then correct | A stale fill (a read that loaded before the write stored after its `DEL`), a dropped invalidation, or the deferred `DEL` racing the read — all bounded by the entry's TTL | `Cache-Control: no-cache` — the repair is a header, and it sticks for the next reader |
+| Stale *every* time for one entity | Dead invalidation: the owner's `del` used a different key than the read | Read a fresh entry, write, and find the `removed 0` line — see [reading the invalidation count](#reading-the-invalidation-count) |
 | Misses spike, then everything is fine again | Normal: TTL expiry or a batch just invalidated entries on purpose | Nothing. `misses` climbing while `skipped` stays flat is a *cold* cache, not a broken one |
 | `skipped` climbing, `misses` flat | The cache server is unreachable; reads fail open | `disabled: true` on `/health` says the client agrees. Find the cache pod, not the service |
-| `503 CACHE_UNAVAILABLE` on POST /v1/recalculations | The queue is a cache write, and it fails **closed** — nothing was enqueued | Exactly what the message says: retry once the cache is back. No work was lost *or* accepted |
+| Reads slow by ~250 ms, then `disabled: true` while the cache pod looks healthy | The server stopped answering on an open connection — a hung process, or a node that went away without closing its sockets. Each command waits out `commandTimeoutMs`; three in a row mark the cache unreachable and the client reconnects | Look for `Cache commands timed out 3 times in a row` in the service logs. If the pod is up but unresponsive, restart it; if the node is gone, the reconnect lands once the Service points somewhere live |
+| `GET /v1/users/%201` answers 404 while `/v1/users/1` works | Expected: identifiers are matched exactly as sent. A spelling that is not canonical cannot form a cache key, so it is answered from the store, uncached | Nothing — and it can no longer overwrite user 1's entry, which is the point |
+| `503 CACHE_UNAVAILABLE` on POST /v1/recalculations | The queue is a cache write, and it fails **closed** — the cache did not confirm the add | Retry once the cache is back. A timed-out add may have landed anyway; re-sending it is harmless, because the set deduplicates |
+| `503 QUEUE_FULL` on POST /v1/recalculations | The queue holds `MAX_QUEUE_SIZE` ids already — it is capped because it is never evicted | Nothing was enqueued. Check the drain is running (sync logs: `{"batch":"start"…}`); retry once it has caught up |
 | The batch ran but some categories have no entry | Their recomputation failed — logged and dropped, not re-queued | Grep the sync logs for `Recomputation of category … failed (upstream <status>)` under the run's derived trace id; fix the cause, re-POST |
 | A list is stale after a write | Either the write's invalidation removed nothing, or the read is a shape no invalidation covers | Find the `Invalidation removed 0` line first. If the count was right, check the read for `?search=` — search is never cached, so a "stale" search result came from the store, not the cache |
-| `?expandOwner=true` answers stale data | Stale *product* data should not happen — the service's own writes kill the composite. Stale *owner* data is the design: users-service's contribution is TTL-bounded | If it is product data: find the `Invalidation removed 0` line. If it is owner data: wait out `REQUEST_CACHE_TTL`, or send `Cache-Control: no-cache` to refresh it now |
-| "I wrote, then re-read, and saw the old value" | The read raced the deferred invalidation (`setImmediate`) — the GET landed before the `DEL` did | Expected, tiny, and unfixable by awaiting: a cache delete is dropped while the cache is down, so the window exists regardless. Send `Cache-Control: no-cache` on the re-read — the bypass-and-refresh is the repair for exactly this |
-| Work accepted before a crash/sync-restart never ran | The in-flight window: `SPOP` removes an id *before* its recomputation, so a crash mid-drain loses the popped batch | By design, and stated in the architecture doc: re-POST the categories. If that loss is unacceptable, the queue needs two-phase pop or a durable broker — not a longer `SPOP` |
-| The same request seems cached twice (hit rate ~50% no matter what) | Hand-built keys: param order or casing reaching the key | All request keys go through `requestKey()`, which sorts and normalizes — a duplicated entry means a key that did not. Find it with `valkey-cli --scan --pattern '*req*'` |
+| `?expandOwner=true` answers stale data | Stale *product* data should not happen — the service's own writes kill the composite. Stale *owner* data is the design: users-service's contribution is TTL-bounded | If it is product data: find the `Invalidation removed 0` line. If it is owner data: wait out `REQUEST_CACHE_TTL`, or send `Cache-Control: no-cache` to refresh it now — it bypasses the composite and the owner entries it is built from |
+| "I wrote, then re-read, and saw the old value" | The re-read raced the deferred invalidation (`setImmediate`), or a read that loaded the source before your write stored its value after the `DEL` | Send `Cache-Control: no-cache` on the re-read — it starts a fresh load (it never joins one already in flight) and overwrites the entry. Without it, the old value lives at most one TTL |
+| Work accepted before a crash/sync-restart never ran | Usually nothing is wrong yet: the reconcile pass schedules queued work every `RECONCILE_INTERVAL_SECONDS`. Two cases do lose work: a crash mid-drain loses the popped batch (the in-flight window), and a **cache** restart drops the whole queue (persistence is off) | Wait one reconcile interval and look for `Found N queued recalculation(s) with no drain scheduled`. If the queue itself is empty, re-POST the categories. If that loss is unacceptable, the queue belongs on durable infrastructure — Redis Streams with consumer groups on a persistent instance, or a broker |
+| The same request seems cached twice (hit rate ~50% no matter what) | Hand-built keys: param order or casing reaching the key | All request keys go through `requestKey()`, which sorts parameters and normalizes the route and names — a duplicated entry means a key that did not. Find it with `valkey-cli --scan --pattern '*req*'` (as an operator user — service users may not `SCAN`) |
 | Keys multiply without bound | An unbounded shape reached the key builder — free text, ad-hoc page guesses | `valkey-cli --scan --pattern '*' | wc -l` over time; every cached shape must be enumerable at invalidation time (the registry is the inventory) |
 
 ---
@@ -87,7 +90,8 @@ Then `grep cache-debug-1` across both services' terminals. The lines, and what e
 | `{"cache":"hit","key":…}` | Answered from the cache. No HTTP hop, no trace fan-out — its absence *is* the evidence | `response.out` follows directly |
 | `{"cache":"negative-hit","key":…}` | The owner has proven this does not exist; answered without a call | If you expected the entity to exist by now: the owner's negative TTL has not passed, or the owner re-proved absence |
 | `{"cache":"joined","key":…}` | Another in-flight miss was already loading this key; this request joined it | One load for N concurrent readers — normal, not a bug |
-| `{"cache":"bypass","key":…}` | `no-cache` honoured: the cached read was skipped | A fresh load and an overwrite follow |
+| `{"cache":"bypass","key":…}` | `no-cache` honoured: the cached read was skipped | A fresh load and an overwrite follow — never a `joined` |
+| `{"cache":"superseded","key":…}` | A `no-cache` read replaced this load while it ran; this load's (older) value went to its own callers but was not written | Nothing — this is what keeps a repair from being overwritten |
 
 The `key` on every line is registry-built, and its shape says which builder made it —
 `{service}_{entity}_{id}` for entities and lists (`users-service_user_1`,
@@ -95,7 +99,7 @@ The `key` on every line is registry-built, and its shape says which builder made
 (`products-service_req_v1-products_expandowner=true`). A key in any other shape was not built
 by the registry at all, and that is the bug.
 
-### The `removed 0` line is the only witness of a dead invalidation
+### Reading the invalidation count
 
 The owner logs every invalidation with the delete count:
 
@@ -103,17 +107,24 @@ The owner logs every invalidation with the delete count:
 Invalidation removed 1 cache entry for user 1 (key users-service_user_1)
 ```
 
-`removed 1` is the last line of a healthy write. **`removed 0` after a successful store write
-means the invalidation targeted a key that did not exist** — which is one of only two things:
+**`removed 0` after a successful store write means the invalidation targeted a key that did not
+exist**, and on its own that is usually healthy. It is one of three things:
 
-1. The entry had already expired (harmless — the stale value was never served), or
-2. The key was built differently from the key the entry was cached under (a bug — casing, the
-   wrong identifier, a hand-built string). The log line prints the key it used; compare it with
-   the key on the reader's `{"cache":"hit",…}` lines. They are the same key or the fix is
-   wherever the difference is.
+1. **Nothing was cached.** The most common case by far: most writes touch entries nobody has read
+   since they last expired or were invalidated.
+2. **The cache was unreachable** and the delete was dropped. The client logs
+   `Cache unreachable — invalidation of <key> dropped` at debug just before it, and `/health`
+   shows `disabled: true`. The old entry, if there was one, lives at most one TTL once the cache is
+   back.
+3. **The key was built differently** from the key the entry was cached under — the bug: the
+   wrong identifier, a hand-built string. The log line prints the key it used; compare it with the
+   key on the reader's `{"cache":"hit",…}` lines. They are the same key or the fix is wherever
+   the difference is.
 
-A `DEL` whose count is swallowed cannot distinguish either case — which is why the design logs
-the count every time, at debug, even when everything works.
+So use the count as a probe, not an alarm: read the entity first (so the entry exists), write it,
+and expect `removed 1`. A `0` there, with the cache reachable, is case 3. The design prevents
+case 3 by construction — every key comes from one registry and one builder — and a test that
+reads, writes and reads again is what catches it for good.
 
 ---
 
@@ -194,14 +205,19 @@ curl -X POST localhost:4003/v1/recalculations -H "Authorization: Bearer $TOKEN" 
   -H 'content-type: application/json' -d '{"categoryIds":["widgets"]}'
 # then kill the sync service INSIDE the 5-second delay window and restart it:
 #   yarn dev:sync
-# the boot log says:
-#   Found 1 orphaned recalculation(s) in the queue at startup — scheduling a batch to drain them
+# within RECONCILE_INTERVAL_SECONDS (30 by default) the log says:
+#   Found 1 queued recalculation(s) with no drain scheduled — scheduling one
 ```
 
-That is the reconciliation path: the `202` went out before the crash, so the work is owed — the
-set is where it waits. Its boundary: work that was already *popped* by a drain that then crashed
-is lost (the set is empty of it), and a **cache-server** restart destroys the whole queue with
-everything else — persistence is off on purpose. Re-POST is the recovery for both.
+That is the reconcile path: the `202` went out before the crash, so the work is owed — the set is
+where it waits, and the periodic pass finds it once the cache client is connected (a check made at
+boot would run before the connection and read the set as empty). If the restart comes within
+`LOCK_TTL_SECONDS` of the crash, the dead process's lock is still held, and the pass simply
+schedules the drain on its next run.
+
+Its boundary: work that was already *popped* by a drain that then crashed is lost (the set is
+empty of it), and a **cache-server** restart destroys the whole queue with everything else —
+persistence is off on purpose. Re-POST is the recovery for both.
 
 ### The outage, on purpose
 
@@ -214,11 +230,18 @@ Stop the container (`docker stop workspace-cache`) while the services run:
 - Restart the container and the client reconnects on its own: one warn line down, one info line
   back up, no restart of any service.
 
+A server that hangs instead of stopping is the harder case — the connection stays open and no
+event says anything is wrong. `docker pause workspace-cache` reproduces it: each read waits out
+`commandTimeoutMs` (250 ms) and fails open; after three in a row the service logs
+`Cache commands timed out 3 times in a row` and `/health` shows `disabled: true`, so later reads
+fail open instantly. `docker unpause workspace-cache` and the reconnect brings it back.
+
 ### The ACL refusing a write is the design working
 
 Run the server with the same ACL file the cluster uses — copy the four `user …` lines out of
 [`infra/git-ops/base/cache/acl-configmap.yaml`](../../infra/git-ops/base/cache/acl-configmap.yaml)
-into `/tmp/users.acl` — then:
+into `/tmp/users.acl` (the `#…` values are SHA-256 hashes of the demo passwords; the server
+compares against them, so the cleartext placeholders below still log in) — then:
 
 ```bash
 docker run -d --name workspace-cache -p 6379:6379 \
@@ -226,8 +249,10 @@ docker run -d --name workspace-cache -p 6379:6379 \
   docker.io/valkey/valkey:8.1.3 --aclfile /acl/users.acl
 
 docker exec -it workspace-cache valkey-cli --user products-service --pass products-service-CHANGE-ME
-> GET users-service_user_1             # fine — a consumer reads the owner's entries
+> GET users-service_user_1             # fine — a consumer reads the entity it consumes
 > SET users-service_user_1 1           # (error) NOPERM … — the server refuses the write
+> GET users-service_session_1          # (error) NOPERM … — only the `user` entity is granted
+> SCAN 0                               # (error) NOPERM … — no listing every key on the server
 > SET products-service_productList_all x   # fine — its OWN prefix: an owner must be able to
 >                                      # invalidate what it owns
 ```

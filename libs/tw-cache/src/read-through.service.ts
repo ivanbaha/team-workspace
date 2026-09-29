@@ -26,7 +26,8 @@ export interface ReadThroughOptions<T> {
    * HTTP `no-cache` semantics: skip the cached read, load from the source, and **overwrite the
    * entry** with what comes back. The repair has to stick — a bypass that leaves the stale entry
    * in place re-serves it to the very next reader, and the person who sent the header concludes
-   * it does nothing.
+   * it does nothing. A `noCache` read never joins a load already in flight: that load may have
+   * read the source before the write the caller is trying to see.
    */
   noCache?: boolean;
   /** Overrides the module TTL for this key. Seconds; a positive integer. */
@@ -48,9 +49,18 @@ export interface ReadThroughOptions<T> {
  * - **Single-flight.** Concurrent misses for one key share one `load` call. A cache stampede is
  *   not caused by the cache being empty; it is caused by N requests all deciding, at the same
  *   moment, that they are the one who must fetch. The per-key in-flight map makes that decision
- *   once, and the rest join the flight that is already under way. A `noCache` request joining a
- *   normal miss in flight is fine — it gets data loaded *now*, which is the freshest thing that
- *   exists, and one load beats two.
+ *   once per process, and the rest join the flight that is already under way. The coalescing is
+ *   per pod: N replicas can still run N loads for one key.
+ *
+ * A `noCache` read is the exception to joining. A flight already under way may have read the
+ * source *before* the write that the caller is trying to see, so joining it would hand back the
+ * old value while claiming a fresh read. It starts its own load and becomes the key's current
+ * flight; the flight it superseded still answers its own callers but no longer writes the cache,
+ * so the older value cannot land on top of the repair.
+ *
+ * What no in-process rule can prevent is the same race across pods: a load on one replica that
+ * read the source before another replica's write can still store its older value after that
+ * write's invalidation. The entry's TTL is the bound on that — see the staleness notes in the docs.
  */
 @Injectable()
 export class ReadThroughService {
@@ -91,21 +101,31 @@ export class ReadThroughService {
       this.logger.debug(JSON.stringify({ cache: 'bypass', key }), CONTEXT, traceId);
     }
 
-    const existing = this.inflight.get(key);
+    const existing = options.noCache ? undefined : this.inflight.get(key);
     if (existing) {
       this.logger.debug(JSON.stringify({ cache: 'joined', key }), CONTEXT, traceId);
       return existing as Promise<T | null>;
     }
 
-    const flight = this.loadAndStore(options).finally(() => this.inflight.delete(key));
+    const flight: Promise<T | null> = this.loadAndStore(options, () => this.inflight.get(key) === flight).finally(
+      () => {
+        if (this.inflight.get(key) === flight) this.inflight.delete(key);
+      },
+    );
     this.inflight.set(key, flight);
     return flight;
   }
 
-  private async loadAndStore<T>(options: ReadThroughOptions<T>): Promise<T | null> {
+  private async loadAndStore<T>(options: ReadThroughOptions<T>, isCurrent: () => boolean): Promise<T | null> {
     const { key, load, traceId } = options;
 
     const value = await load();
+    if (!isCurrent()) {
+      // A later no-cache read started its own load while this one was running; its value is the
+      // newer one, and writing this one now would put the older value back on top of it.
+      this.logger.debug(JSON.stringify({ cache: 'superseded', key }), CONTEXT, traceId);
+      return value ?? null;
+    }
     if (value === null || value === undefined) {
       await this.cache.set(key, NEGATIVE_CACHE_SENTINEL, options.negativeTtlSeconds ?? this.options.negativeTtlSeconds);
       this.logger.debug(JSON.stringify({ cache: 'negative-filled', key }), CONTEXT, traceId);

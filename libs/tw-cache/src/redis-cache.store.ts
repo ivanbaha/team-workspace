@@ -19,22 +19,38 @@ interface RedisStoreHandlers {
 export class RedisCacheStore implements ICacheStore {
   private readonly client: Redis;
 
-  constructor(url: string, handlers: RedisStoreHandlers) {
+  constructor(url: string, commandTimeoutMs: number, handlers: RedisStoreHandlers) {
     this.client = new Redis(url, {
       // A command issued while disconnected rejects immediately, instead of queueing for a
       // connection that may never come back. Queued reads are reads nobody waits for any more;
-      // queued writes are worse — they flush against recovered state minutes later, applying a
-      // decision made against the world as it was. The service turns the rejection into the
-      // outage policy instead of the request waiting on a maybe.
+      // queued writes are worse — they flush against recovered state later, applying a decision
+      // made against the world as it was. The service turns the rejection into the outage policy
+      // instead of the request waiting on a maybe.
       enableOfflineQueue: false,
+      // The offline queue only covers a connection that is known to be down. A server that is
+      // connected but silent — a hung process, a lost node black-holing an established TCP
+      // connection — emits no event at all, and without a deadline every command waits until the
+      // kernel gives up on the socket, which takes minutes. Fail-open is only as fast as this.
+      commandTimeout: commandTimeoutMs,
+      // Commands in flight when a connection drops are failed, not re-sent after the reconnect: a
+      // re-sent SET is a fill that lands after whatever invalidation happened in the meantime.
+      autoResendUnfulfilledCommands: false,
     });
 
     // Availability comes from connection events, not from per-command errors: the first failed
     // command of an outage would otherwise be indistinguishable from every other failure kind,
-    // and the transitions are what the health endpoint and the logs want to state.
+    // and the transitions are what the health endpoint and the logs want to state. `close` is
+    // the one a server that shuts down cleanly sends — no `error`, and no `end` while the client
+    // is still reconnecting.
     this.client.on('ready', () => handlers.onUp());
     this.client.on('error', (error: Error) => handlers.onDown(error.message));
+    this.client.on('close', () => handlers.onDown('connection closed'));
     this.client.on('end', () => handlers.onDown('connection closed'));
+  }
+
+  /** Drops the connection and lets the client reconnect — how the service abandons a silent socket. */
+  reconnect(): void {
+    this.client.disconnect(true);
   }
 
   async get<T>(key: string): Promise<T | null> {
@@ -82,6 +98,10 @@ export class RedisCacheStore implements ICacheStore {
   }
 
   async close(): Promise<void> {
+    // QUIT lets the server finish what it has. While the connection is down it is refused outright
+    // (there is no offline queue to hold it) and the client goes on reconnecting — which would keep
+    // a stopping process alive until it is killed. disconnect() is what ends the reconnecting.
     await this.client.quit().catch(() => undefined);
+    this.client.disconnect();
   }
 }

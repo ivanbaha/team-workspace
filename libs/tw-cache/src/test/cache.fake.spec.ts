@@ -69,6 +69,15 @@ describe('shared cache behaviour', () => {
           });
         });
 
+        it('hands every reader its own copy, like a server that parses per GET', async () => {
+          await cache.set('k', { tags: ['a'] });
+
+          const first = await cache.get<{ tags: string[] }>('k');
+          first?.tags.push('changed by a caller');
+
+          expect(await cache.get('k')).toEqual({ tags: ['a'] });
+        });
+
         it('round-trips the negative sentinel as a plain readable value, which is how negative caching stores it', async () => {
           await cache.set('k', NEGATIVE_CACHE_SENTINEL);
 

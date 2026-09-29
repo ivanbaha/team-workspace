@@ -13,10 +13,20 @@ describe('requestKey', () => {
     expect(forward).toBe('products-service_req_v1-products_category=widgets&expandowner=true');
   });
 
-  it('normalizes casing and whitespace on every segment', () => {
-    expect(requestKey('productCatalog', ' V1-Products ', { ExpandOwner: 'True', Category: ' Widgets ' })).toBe(
+  it('normalizes the route and parameter names — both are written by code, not read by the loader', () => {
+    expect(requestKey('productCatalog', ' V1-Products ', { ExpandOwner: true, Category: 'widgets' })).toBe(
       'products-service_req_v1-products_category=widgets&expandowner=true',
     );
+  });
+
+  it.each([
+    ['upper-cased', { category: 'Widgets' }],
+    ['padded', { category: ' widgets ' }],
+    ['a boolean spelled as text', { expandOwner: 'True' }],
+  ])('refuses a parameter value that is %s instead of rewriting it', (_case, params) => {
+    // The value is what the loader filters on: lowercasing 'Widgets' would give it the key of
+    // 'widgets' while its loader returns a different list.
+    expect(() => requestKey('productCatalog', 'v1-products', params)).toThrow(/as given/u);
   });
 
   it('keeps booleans and numbers canonical', () => {

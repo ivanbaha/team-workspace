@@ -1,7 +1,7 @@
 import type { ICacheStore } from './types';
 
 interface Entry {
-  value: unknown;
+  json: string;
   expiresAt: number;
 }
 
@@ -10,9 +10,10 @@ interface Entry {
  *
  * Used when no `url` is configured — local development, mostly — and it is the reason that mode
  * is safe to leave as a default: it is not a stub that pretends, it is the same behaviour with a
- * different address space. That includes the JSON round trip below, which both stores perform so
- * a Date is an ISO string in either — code tested against this store does not meet new
- * serialisation rules the day it is pointed at a server.
+ * different address space. That includes the JSON handling below, which matches the server's
+ * exactly: the value is serialised on write and parsed again on every read, so a Date is an ISO
+ * string in either store, and no reader ever holds an object shared with the cache — code tested
+ * against this store does not meet new serialisation rules the day it is pointed at a server.
  */
 export class MemoryCacheStore implements ICacheStore {
   private readonly entries = new Map<string, Entry>();
@@ -26,16 +27,16 @@ export class MemoryCacheStore implements ICacheStore {
       this.entries.delete(key);
       return null;
     }
-    return entry.value as T;
+    // A fresh parse per read, like the server's GET: a caller that mutates what it read changes
+    // its own copy, never the entry the next reader gets.
+    return JSON.parse(entry.json) as T;
   }
 
   async set(key: string, value: unknown, ttlSeconds: number): Promise<void> {
-    this.entries.set(key, {
-      // Round-trip on write, so this store answers with exactly the shape the server-backed one
-      // would: a Date goes in, an ISO string is what a reader gets, in both stores alike.
-      value: JSON.parse(JSON.stringify(value)),
-      expiresAt: Date.now() + ttlSeconds * 1000,
-    });
+    const json = JSON.stringify(value);
+    // `undefined` and functions serialise to nothing: there is no value a reader could get back.
+    if (json === undefined) throw new TypeError(`Cannot cache ${String(value)} under ${key}: not JSON-serialisable`);
+    this.entries.set(key, { json, expiresAt: Date.now() + ttlSeconds * 1000 });
   }
 
   async del(key: string): Promise<number> {

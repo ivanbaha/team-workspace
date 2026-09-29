@@ -91,12 +91,23 @@ The demand is the caller's, so it travels: the connector forwards `cache-control
 and it survives every hop. Writes never read the header — invalidation after a write is
 unconditional, not something a caller opts into.
 
+**Who may send it is an edge decision.** This borrows a request directive RFC 9111 defines for
+HTTP caches and applies it to the caches behind the origin, which makes it an amplification
+lever: browsers send `no-cache` on every hard reload and whenever devtools disables caching, and
+each such request costs the owner a source read — a composite, one per part. Strip it from
+public traffic at the gateway, or rate-limit it; keep it for internal callers, batch jobs and
+operators, for whom it is the repair tool.
+
 Which read answers from a cache is part of each service's contract, stated in its README:
 bounded shapes are cached and invalidated by their owner; a composite answer (e.g.
 `GET /v1/products?expandOwner=true` without filters) is refreshed by its own service's writes
-and TTL-bounded for the parts contributed by other owners — `no-cache` refreshes it like
-anything else. Free-text queries (`?search=`) are **never cached**: free text cannot form a key
-anyone can enumerate, and therefore cannot be invalidated.
+and TTL-bounded for the parts contributed by other owners — `no-cache` bypasses the composite
+and the parts it is built from. Free-text queries (`?search=`) are **never cached**: free text
+cannot form a key anyone can enumerate, and therefore cannot be invalidated.
+
+Path and query identifiers are matched exactly as sent. A spelling that is not canonical
+(`/v1/users/%201`, `?category=Widgets`) is answered from the source of truth, uncached — it
+cannot read, or write, the cache entry of the value it resembles.
 
 See [Shared Cache](./shared-cache.md) for the design, and
 [Debugging the Cache](../guides/debugging-the-cache.md) for the repair procedure.
@@ -140,4 +151,5 @@ On error:
 | 403  | Forbidden                      |
 | 404  | Not found                      |
 | 500  | Internal server error          |
-| 503  | `CACHE_UNAVAILABLE` — the queue behind this endpoint refuses work while the shared cache is down; nothing was accepted, retry |
+| 503  | `CACHE_UNAVAILABLE` — the shared cache did not confirm the enqueue, so the work is not accepted; retry (safe — the queue deduplicates) |
+| 503  | `QUEUE_FULL` — accepting the work would take the queue past its cap; nothing was enqueued, retry once it drains |

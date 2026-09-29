@@ -1,14 +1,14 @@
-import { CACHE_NAMESPACES } from './cache-keys';
+import { CACHE_IDENTIFIER_PATTERN, CACHE_NAMESPACES } from './cache-keys';
 
 import type { CacheNamespaceName } from './cache-keys';
 
 /** Values a request-key parameter may carry. Booleans, numbers and identifiers — nothing else. */
 export type RequestKeyParams = Record<string, string | number | boolean>;
 
-// The same character contract as an entity id in cacheKeys(): a segment that does not survive this
+// The same character contract as an entity id in cacheKey(): a segment that does not survive this
 // pattern is a segment two call sites may format differently — one more separator, one casing
 // variant — and the "same" request produces two cache entries, half of which nothing invalidates.
-const SEGMENT_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+const SEGMENT_PATTERN = CACHE_IDENTIFIER_PATTERN;
 
 /**
  * Builds a key for a cached *request* — a composite answer cached as one value — from the
@@ -16,14 +16,20 @@ const SEGMENT_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
  *
  * The difference from an entity key is the id: a request has no id, it has a route and a set of
  * query parameters, and the whole failure mode of request caching is that the same request can be
- * *spelled* several ways. Two callers sending the same filters in different orders, different
- * casing, `?expandOwner=true` versus absent-with-default — each spelling must produce one key, or
- * the cache quietly holds duplicates that expire independently: a hit rate that reads fine while
- * half the traffic misses, and a stale twin that survives the refresh of its sibling. So the
- * serialization here is canonical or it throws:
+ * *spelled* several ways. Two call sites building the same filters in a different order, or with
+ * a differently cased parameter name, must produce one key, or the cache quietly holds duplicates
+ * that expire independently: a hit rate that reads fine while half the traffic misses, and a stale
+ * twin that survives the refresh of its sibling. So the serialization here is canonical or it
+ * throws:
  *
- * - **Parameters are sorted by key.** Construction order cannot leak into the key.
- * - **Keys, routes and values are trimmed and lowercased.** Casing and whitespace cannot either.
+ * - **Parameters are sorted by name.** Construction order cannot leak into the key.
+ * - **The route and parameter names are trimmed and lowercased.** Both are written by the code,
+ *   and the loader never reads them back out of the key, so their spelling cannot change an answer.
+ * - **Values are validated as given — never trimmed or lowercased.** A value comes from the
+ *   request and is what the loader filters on. Rewriting it would map `Widgets` and `widgets` to
+ *   one key while their loaders return different lists, and whichever filled the key first would
+ *   answer for both. A value that is not already canonical is refused; the call site serves that
+ *   request uncached.
  * - **Values are strictly limited** to what `SEGMENT_PATTERN` survives, checked per value.
  *   Free text is refused on purpose, by construction: a key built from arbitrary user input is a
  *   key space nobody can enumerate, and a key space nobody can enumerate is one nobody can
@@ -74,18 +80,18 @@ export function requestKey(name: CacheNamespaceName, route: string, params: Requ
         );
       }
 
-      // Booleans are already lowercase by construction; everything else is normalized like an id.
-      const normalizedValue = typeof value === 'boolean' ? String(value) : String(value).trim().toLowerCase();
-      if (!SEGMENT_PATTERN.test(normalizedValue)) {
+      const segment = String(value);
+      if (!SEGMENT_PATTERN.test(segment)) {
         throw new Error(
           `Refusing to build a request key for namespace '${name}' from parameter '${key}': value ` +
-            `${JSON.stringify(value)} does not match /^[a-z0-9][a-z0-9._-]*$ after normalization. Free-text query ` +
-            'values cannot form cache keys — a key space nobody can enumerate is one nobody can invalidate. ' +
-            'Endpoints with free-text parameters do not get request caching.',
+            `${JSON.stringify(value)} does not match /^[a-z0-9][a-z0-9._-]*$/ as given. Values are validated, never ` +
+            'trimmed or lowercased — the loader filters on the raw value. Free-text query values cannot form cache ' +
+            'keys either: a key space nobody can enumerate is one nobody can invalidate. Serve such a request ' +
+            'uncached.',
         );
       }
 
-      return `${key}=${normalizedValue}`;
+      return `${key}=${segment}`;
     })
     .join('&');
 

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { CacheService, cacheKeyOrNull } from '@tw/cache';
 import { HttpConnectionService } from '@tw/http-connector';
 import { LoggerService } from '@tw/logger';
@@ -19,15 +19,37 @@ function positiveInteger(value: number, name: string): number {
 }
 
 /**
+ * Thrown when accepting more work would take the queue past `MAX_QUEUE_SIZE`.
+ *
+ * The queue set carries no TTL — it is the one thing on the shared cache that eviction must never
+ * touch — so it is also the one thing that cannot be shed under memory pressure. Unbounded, a
+ * flood of ids would first push every other service's entries out of the cache, then leave the
+ * server refusing writes. The cap is what keeps "never evicted" from meaning "grows until the
+ * shared cache stops working".
+ */
+export class QueueFullError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QueueFullError';
+  }
+}
+
+/**
  * The cache's **operator** role: it runs the work queue, the batch lock, and the recomputation
  * that keeps the aggregate entries fresh.
  *
  * The queue is a Redis Set on the shared cache — `SADD` enqueues (duplicates collapse for free),
  * `SPOP` drains atomically (two drains can never hand out the same id), and the set survives a
- * crash of this service, which is the whole reason the queue lives there and not in a timer. The
- * batch lock is `SET NX EX`: it stops N accepted requests from scheduling N drains of the same
- * queue. Its TTL is the release — there is no unlock call, because a process that died between
- * acquiring and draining must not block scheduling forever.
+ * crash of this service, which is the whole reason the queue lives there and not in a timer. It
+ * does **not** survive a restart of the cache server, which runs without persistence: work queued
+ * then is gone, and re-POSTing is the recovery.
+ *
+ * The batch lock is `SET NX EX`: it stops N accepted requests from scheduling N drains of the
+ * same queue. The drain releases it when it finishes and looks at the queue once more, so work
+ * that arrived while the lock was held gets a drain of its own; the TTL is only the release for a
+ * holder that died. And because every "schedule a drain" can be lost — a crash between the lock
+ * and the timer, a cache outage, an evicted lock, a boot that ran before the connection did — a
+ * periodic reconcile looks for queued work with nothing scheduled and schedules it.
  *
  * Everything here runs **outside request scope**, so this service takes the singleton
  * `LoggerService` and the singleton `HttpConnectionService` — the second half of the two-connector
@@ -36,58 +58,79 @@ function positiveInteger(value: number, name: string): number {
  * family rather than N unrelated roots.
  */
 @Injectable()
-export class RecalculationsService {
+export class RecalculationsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly productsUrl = process.env.PRODUCTS_SERVICE_URL ?? 'http://localhost:4002';
   private readonly batchDelayMs: number;
   private readonly lockTtlSeconds: number;
   private readonly batchSize: number;
   private readonly statsTtlSeconds: number;
+  private readonly reconcileIntervalMs: number;
+  private readonly maxQueueSize: number;
+  private readonly drainTimers = new Set<NodeJS.Timeout>();
+  private reconcileTimer: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly cache: CacheService,
     private readonly http: HttpConnectionService,
     private readonly logger: LoggerService,
   ) {
+    // Each duration is defined once, in seconds; the milliseconds are derived once, here.
     this.batchDelayMs =
       positiveInteger(Number(process.env.BATCH_DELAY_SECONDS ?? 5), 'BATCH_DELAY_SECONDS') * 1000;
     this.lockTtlSeconds = positiveInteger(Number(process.env.LOCK_TTL_SECONDS ?? 10), 'LOCK_TTL_SECONDS');
     this.batchSize = positiveInteger(Number(process.env.BATCH_SIZE ?? 100), 'BATCH_SIZE');
-    // The cache lib validates this one per write; a NaN here fails the first `set`, loudly.
+    this.reconcileIntervalMs =
+      positiveInteger(Number(process.env.RECONCILE_INTERVAL_SECONDS ?? 30), 'RECONCILE_INTERVAL_SECONDS') * 1000;
+    this.maxQueueSize = positiveInteger(Number(process.env.MAX_QUEUE_SIZE ?? 10_000), 'MAX_QUEUE_SIZE');
+    // The cache lib validates this one per write; CacheModule.forRoot() already refused a bad
+    // CACHE_TTL at boot, since it is the same variable.
     this.statsTtlSeconds = Number(process.env.CACHE_TTL ?? 300);
   }
 
   /**
-   * Startup reconciliation: a previous process may have enqueued ids and died before its drain
-   * ran. The set is the durable half of the queue, so the work is still there — this is what
-   * schedules the drain that finishes it. Without this, an id accepted seconds before a crash
-   * would sit in the set forever while its stats entry went staler and staler.
+   * Starts the reconcile loop. Deliberately not a one-off check at startup: at bootstrap the cache
+   * client is still connecting, and a check made then reads the queue as empty — the orphans a
+   * startup check exists to find would sit until the next POST. On an interval, work stranded by a
+   * crash, an outage, an evicted lock or a lost timer is picked up within one period.
    */
-  async onApplicationBootstrap(): Promise<void> {
-    const pending = await this.cache.getSizeOfSet(QUEUE_KEY);
-    if (pending === 0) return;
+  onApplicationBootstrap(): void {
+    this.reconcileTimer = setInterval(() => void this.reconcile(), this.reconcileIntervalMs);
+    // Background housekeeping must not be what keeps a stopping process alive.
+    this.reconcileTimer.unref();
+  }
 
-    this.logger.warn(
-      `Found ${pending} orphaned recalculation(s) in the queue at startup — scheduling a batch to drain them`,
-      CONTEXT,
-    );
-    await this.scheduleBatch();
+  /** Stops the loop and any armed drain; the queued ids stay in the set for the next reconcile. */
+  onModuleDestroy(): void {
+    clearInterval(this.reconcileTimer);
+    for (const timer of this.drainTimers) clearTimeout(timer);
+    this.drainTimers.clear();
   }
 
   /**
    * Enqueues category ids and makes sure a drain is scheduled to process them.
    *
-   * `addToSet` **fails closed** — it throws when the cache is unreachable, and the controller maps
-   * that to a 503 — because this is a write, and reporting "accepted" for work that was never
-   * stored would lose it silently. That is the opposite policy from the reads, which fail open:
-   * the rule the whole cache lib follows is "fail open when the *cache* is broken, fail closed
-   * when the *caller* would be lied to".
+   * `addToSet` **fails closed** — it throws when the cache is unreachable or does not confirm the
+   * add, and the controller maps that to a 503 — because this is a write, and reporting "accepted"
+   * for work that was never stored would lose it silently. That is the opposite policy from the
+   * reads, which fail open: the rule the whole cache lib follows is "fail open when the *cache* is
+   * broken, fail closed when the *caller* would be lied to".
    *
    * @returns how many ids were newly added (an id already in the set is not re-added), and
-   *   whether this call scheduled the drain (false = one was already scheduled, or the lock
-   *   could not be taken because the cache is unreachable — in both cases the work is in the
-   *   set, so nothing is lost).
+   *   whether this call scheduled the drain (false = one was already scheduled, or the lock could
+   *   not be taken — the work is in the set either way, and the drain in progress, the next
+   *   request or the reconcile loop will pick it up).
    */
   async requestRecalculation(categoryIds: string[]): Promise<{ queued: number; scheduled: boolean }> {
+    // A soft cap: two replicas can both pass the check before either adds. The overshoot is
+    // bounded by one request per concurrent caller, and the DTO bounds what one request carries.
+    const pending = await this.cache.getSizeOfSet(QUEUE_KEY);
+    if (pending + categoryIds.length > this.maxQueueSize) {
+      throw new QueueFullError(
+        `The recalculations queue holds ${pending} id(s); accepting ${categoryIds.length} more would exceed ` +
+          `MAX_QUEUE_SIZE (${this.maxQueueSize}).`,
+      );
+    }
+
     const queued = await this.cache.addToSet(QUEUE_KEY, categoryIds);
     const scheduled = await this.scheduleBatch();
     return { queued, scheduled };
@@ -97,10 +140,9 @@ export class RecalculationsService {
    * Schedules one drain, if this call wins the lock.
    *
    * The lock fails closed on a cache outage (returns false, no timer): the work stays safely in
-   * the set, and the next accepted request — or a restart's reconciliation — schedules the drain
-   * once the cache is back. The lock is a cost optimisation, not the correctness mechanism: if its
-   * TTL were shorter than the delay, a second request could schedule a second drain, and both
-   * drains would simply split the set between them — SPOP hands each id to exactly one of them.
+   * the set, and the reconcile loop schedules the drain once the cache is back. The lock is a cost
+   * optimisation, not the correctness mechanism: if two drains ever ran at once, they would simply
+   * split the set between them — SPOP hands each id to exactly one of them.
    */
   private async scheduleBatch(): Promise<boolean> {
     const acquired = await this.cache.acquireLock(LOCK_KEY, this.lockTtlSeconds);
@@ -109,12 +151,24 @@ export class RecalculationsService {
       return false;
     }
 
-    // The delay is defined once, in seconds; the milliseconds are derived once, here. Unit
-    // consistency between the two is not left to whoever reads the constant next.
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      this.drainTimers.delete(timer);
       void this.drain();
     }, this.batchDelayMs);
+    this.drainTimers.add(timer);
     return true;
+  }
+
+  /**
+   * Finds queued work that nothing is going to drain, and schedules a drain for it. Taking the
+   * lock is the test: if a drain is already scheduled, the lock is held and this does nothing.
+   */
+  private async reconcile(): Promise<void> {
+    const pending = await this.cache.getSizeOfSet(QUEUE_KEY);
+    if (pending === 0) return;
+    if (await this.scheduleBatch()) {
+      this.logger.warn(`Found ${pending} queued recalculation(s) with no drain scheduled — scheduling one`, CONTEXT);
+    }
   }
 
   /**
@@ -140,10 +194,8 @@ export class RecalculationsService {
     let processed = 0;
 
     while (ids.length > 0) {
-      // Queued ids arrive from a request body, so an un-keyable one must not be able to kill the
-      // whole drain: it simply has no stats entry to invalidate. Without the null variant, one
-      // malformed id would throw here — after the pop, before the recompute — taking the rest
-      // of the batch with it.
+      // Queued ids are validated at the POST, but the set is shared state: an id that cannot form
+      // a key simply has no stats entry to invalidate, rather than killing the rest of the batch.
       const keys = ids
         .map((id) => cacheKeyOrNull('categoryStats', id))
         .filter((key): key is string => key !== null);
@@ -181,6 +233,14 @@ export class RecalculationsService {
     }
 
     this.logger.info(JSON.stringify({ batch: 'done', runId, processed }), CONTEXT, runId);
+
+    // The lock outlives the drain timer on purpose — it is what collapses a burst of requests into
+    // one drain — so a request that arrived after the last pop above found it held and armed
+    // nothing. Release it and look once more: anything added since then gets a drain of its own.
+    // The release checks no ownership (if this drain outran the TTL, another holder's lock goes
+    // too); the worst that costs is one extra drain, and SPOP means never a duplicated item.
+    await this.cache.del(LOCK_KEY);
+    if ((await this.cache.getSizeOfSet(QUEUE_KEY)) > 0) await this.scheduleBatch();
   }
 
   /**

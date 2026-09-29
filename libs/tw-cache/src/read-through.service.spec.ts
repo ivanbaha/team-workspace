@@ -97,6 +97,50 @@ describe('ReadThroughService', () => {
 
       expect(await cache.get('users-service_user_9')).toBe(NEGATIVE_CACHE_SENTINEL);
     });
+
+    it('does not join a load already in flight — that load may have read the source before the write', async () => {
+      const cache = makeCache();
+      const readThrough = makeReadThrough(cache);
+      let source = 'v1';
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const slowLoad = async () => {
+        const snapshot = source; // read now, returned later
+        await gate;
+        return { v: snapshot };
+      };
+
+      const before = readThrough.readThrough({ key: 'k', load: slowLoad });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      source = 'v2'; // the write the client is about to re-read
+      const repair = readThrough.readThrough({ key: 'k', load: async () => ({ v: source }), noCache: true });
+
+      await expect(repair).resolves.toEqual({ v: 'v2' });
+      release();
+      await expect(before).resolves.toEqual({ v: 'v1' }); // its own callers still get their answer
+
+      // ...but the superseded load does not put the older value back on top of the repair.
+      expect(await cache.get('k')).toEqual({ v: 'v2' });
+    });
+
+    it('lets later misses join the repair flight, not the one it superseded', async () => {
+      const cache = makeCache();
+      const readThrough = makeReadThrough(cache);
+      const never = new Promise<{ v: string }>(() => undefined);
+      let release!: (value: { v: string }) => void;
+      const repairLoad = jest.fn(() => new Promise<{ v: string }>((resolve) => (release = resolve)));
+
+      void readThrough.readThrough({ key: 'k', load: () => never });
+      await new Promise((resolve) => setImmediate(resolve));
+      const repair = readThrough.readThrough({ key: 'k', load: repairLoad, noCache: true });
+      const follower = readThrough.readThrough({ key: 'k', load: jest.fn() });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      release({ v: 'fresh' });
+      await expect(Promise.all([repair, follower])).resolves.toEqual([{ v: 'fresh' }, { v: 'fresh' }]);
+      expect(repairLoad).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('single-flight', () => {

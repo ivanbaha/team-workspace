@@ -11,6 +11,19 @@ export const users: User[] = [
   { id: '2', name: 'Bob', email: 'bob@example.com', passwordHash: 'hashed_pw' },
 ];
 
+let lastId = Math.max(0, ...users.map((user) => Number(user.id)));
+
+/**
+ * The next user id: sequential, and never reused. `users.length + 1` would hand a deleted user's
+ * id to the next registration while caches still hold entries for the old one. Sequential is still
+ * predictable, though — a lookup for the next id before it exists caches a 404 that the create
+ * has to clear, which is why every write path invalidates the id it creates.
+ */
+export function nextUserId(): string {
+  lastId += 1;
+  return String(lastId);
+}
+
 /** The public projection. `passwordHash` never leaves this module. */
 export type PublicUser = Omit<User, 'passwordHash'>;
 

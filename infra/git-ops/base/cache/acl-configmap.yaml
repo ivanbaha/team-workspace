@@ -9,7 +9,7 @@ data:
   # The ACL file mounted at /etc/valkey/acl/users.acl. One `user` line per cache
   # participant, each scoped to the key pattern it may touch:
   #
-  #   users-service          owns `users-service_user_*`          — reads AND writes its own
+  #   users-service          owns `users-service_*` — reads AND writes its own
   #     prefix. Only the owner writes an owner's keys: only it knows what a fresh
   #     value is, and its own invalidations are what keep the entries honest.
   #     One prefix, one rule set: a flat line is correct here.
@@ -23,10 +23,12 @@ data:
   #     prevent). Selectors fix it: each parenthesised rule set pairs its own
   #     commands with its own patterns. The first — read-write on its own
   #     `products-service_*` (product, productList and req entries; an owner must
-  #     be able to invalidate what it owns). The second — READ-only on
-  #     `users-service_*`, the owner's prefix: a hit there skips the HTTP hop, and
-  #     a consumer bug that tries to write is refused by the server
-  #     (verified: `SET`/`DEL` → NOPERM, `GET` → allowed).
+  #     be able to invalidate what it owns). The second — READ-only, and only on
+  #     the entity it consumes, `users-service_user_*`: a hit there skips the HTTP
+  #     hop, a consumer bug that tries to write is refused by the server (verified:
+  #     `SET`/`DEL` → NOPERM, `GET` → allowed), and whatever else users-service
+  #     caches later is not readable by default. Grant consumers per entity, the
+  #     way the key registry names them, not per owner.
   #
   #   products-sync-service  owns `products-sync-service_*` — its category-stats
   #     entries AND its queue and lock keys, which share the same prefix and are
@@ -38,16 +40,30 @@ data:
   #
   # Command grants, per user:
   #   +@connection  AUTH/HELLO/PING — without it the client cannot authenticate at all
-  #   +@read        GET, SPOP, SCARD … (consumers get read only)
-  #   +@write       SET, DEL, SADD …   (DEL is a write: invalidation must work)
-  #   -@dangerous   FLUSHALL, FLUSHDB, CONFIG … — no cache participant has any
+  #   +@read        GET, SCARD, EXISTS … (consumers get read only)
+  #   +@write       SET, DEL, SADD, SPOP … (DEL is a write: invalidation must work)
+  #   -@dangerous   FLUSHALL, FLUSHDB, CONFIG, KEYS … — no cache participant has any
   #                 business wiping the cache, under any credential
+  #   +info         INFO is in @dangerous, but ioredis's ready check sends it on
+  #                 every connect; refused, the client prints a raw console.warn
+  #                 outside the service's logger each time. It exposes server
+  #                 stats, not keys or values.
+  #   -scan -randomkey  keyless reads: key patterns cannot scope them, so under
+  #                 +@read they would let any participant list every key name on
+  #                 the shared server. No service needs them; operators debug
+  #                 with their own user.
   #
-  # The passwords below are the placeholder values from the `cache-credentials`
-  # Secret, in cleartext form. Rotate by changing both files together (or switch
-  # the ACL to hashed `#bcrypt` form and manage the Secret alone).
+  # Passwords: each `#…` is the SHA-256 of the service's password in the
+  # `cache-credentials` Secret (the demo placeholders, hashed) — the server keeps
+  # only hashes, so this ConfigMap holds no credential. A hash is only as strong as
+  # what it hashes: use long random passwords, never guessable ones.
+  #   printf '%s' "$PASSWORD" | shasum -a 256
+  # Rotation: change the Secret and the hash together. The server reads this file
+  # at startup only, so a change here reaches it on the next restart of the cache
+  # pod — which, with persistence off, empties the cache and the work queue. Roll
+  # the cache first, then the services, inside a window where that is acceptable.
   users.acl: |
     user default off
-    user users-service on >users-service-CHANGE-ME ~users-service_* +@read +@write +@connection -@dangerous
-    user products-service on >products-service-CHANGE-ME (~products-service_* +@read +@write +@connection -@dangerous) (~users-service_* +@read +@connection -@dangerous)
-    user products-sync-service on >products-sync-service-CHANGE-ME ~products-sync-service_* +@read +@write +@connection -@dangerous
+    user users-service on #6ff21edde2cd075e92043be432bc6dd245ed39e8bcf9f24ed2704ba71c5605b8 ~users-service_* +@read +@write +@connection -@dangerous +info -scan -randomkey
+    user products-service on #b85e1b0379a22ac76922e076d7f9705b1cfe95518f7167104ea8dacd9cf0e6fb (~products-service_* +@read +@write +@connection -@dangerous +info -scan -randomkey) (~users-service_user_* +@read +@connection -@dangerous -scan -randomkey)
+    user products-sync-service on #8fc60dc214a1af4c35034cdebf52bdd102da24ed984783d3ef4cc0c280bdcd13 ~products-sync-service_* +@read +@write +@connection -@dangerous +info -scan -randomkey

@@ -22,7 +22,7 @@ export interface ICacheOptions {
   url?: string;
 
   /**
-   * TTL for every entry, in seconds — the one unit the layer uses. Must be a positive integer;
+   * TTL for every entry, in seconds — the one TTL unit the layer uses. Must be a positive integer;
    * zero is a configuration error, not "no expiry".
    *
    * @default 60
@@ -38,6 +38,17 @@ export interface ICacheOptions {
    */
   negativeTtlSeconds?: number;
 
+  /**
+   * How long a single command may wait for the server, in milliseconds — the unit is in the name
+   * because it is the one duration here that is not a TTL. A command that gets no answer in time
+   * fails like one sent to an unreachable server: reads fail open, queue writes fail closed. Keep
+   * it well under the latency budget of the requests that read the cache — a cache hit is only
+   * worth having if it is faster than the hop it replaces.
+   *
+   * @default 250
+   */
+  commandTimeoutMs?: number;
+
   /** @default true */
   isGlobal?: boolean;
 }
@@ -49,6 +60,7 @@ export class CacheOptions implements ICacheOptions {
   url: string | undefined = undefined;
   ttlSeconds = 60;
   negativeTtlSeconds = 30;
+  commandTimeoutMs = 250;
   isGlobal = true;
 }
 

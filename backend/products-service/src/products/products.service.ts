@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { CacheService, ReadThroughService, cacheKey, cacheKeyOrNull, requestKey } from '@tw/cache';
+import { CacheService, ReadThroughService, assertTtlSeconds, cacheKeyOrNull, requestKey } from '@tw/cache';
 import { RequestScopedLoggerService } from '@tw/logger';
 import { UsersConnector } from '../connectors/users.connector';
-import { products } from '../data/products.store';
+import { nextProductId, products } from '../data/products.store';
 
 import type { PublicUser } from '../connectors/users.connector';
 import type { Product } from '../data/products.store';
@@ -17,12 +17,23 @@ const CONTEXT = 'ProductsService';
 /** The composite the request cache holds: the whole catalog with owners resolved. */
 const CATALOG_ROUTE = 'v1-products';
 /**
- * The request cache's only invalidation is its clock: a composite spans owners (this list joined
- * with users-service's owner entries), and only an owner can invalidate its own keys, so nobody
- * is in a position to invalidate the composite. Short on purpose — the catalog view may be up to
- * this many seconds stale and self-heals.
+ * The composite's TTL. This service's writes invalidate the composite's key, but no write here can
+ * reach the *other* owner's contribution to it — the owner entries users-service resolved into
+ * the cached answer. For that part the clock is the invalidation: short on purpose, so the catalog
+ * view may show an owner up to this many seconds stale and self-heals.
  */
 const REQUEST_CACHE_TTL_SECONDS = Number(process.env.REQUEST_CACHE_TTL ?? 10);
+// Checked when the module loads — at boot — like every TTL CacheModule.forRoot() is given. A value
+// only checked per call would boot fine and then fail every composite request.
+assertTtlSeconds(REQUEST_CACHE_TTL_SECONDS, 'REQUEST_CACHE_TTL');
+
+/**
+ * The shape id a list is cached under. `all` for the unfiltered list, `category.<name>` for a
+ * category: the prefix keeps the two apart by construction, so `?category=all` is its own shape
+ * and can never land on the unfiltered list's key. Truthiness matches `filterFromStore` — an empty
+ * `?category=` is the unfiltered list there, so it is the `all` shape here.
+ */
+const listShape = (category: string | undefined): string => (category ? `category.${category}` : 'all');
 
 /**
  * The Products domain's data — and this service owns its cache entries. Two read shapes, each a
@@ -31,9 +42,9 @@ const REQUEST_CACHE_TTL_SECONDS = Number(process.env.REQUEST_CACHE_TTL ?? 10);
  * - **Entities** — `GET /v1/products/:id` reads through the `product` entry like users-service
  *   reads a `user`: invalidated by this service on every write, negative-cached when absent.
  * - **Bounded lists** — `GET /v1/products` (and `?category=`) caches the whole hydrated list as
- *   one value under `productList_all` / `productList_<category>`. Any write to any product kills
- *   **every** list shape: the membership-vs-content split that "smarter" list caching does is a
- *   set of invalidation branches that can be gotten wrong, and its savings — one store read
+ *   one value under `productList_all` / `productList_category.<name>`. Any write to any product
+ *   kills **every** list shape: the membership-vs-content split that "smarter" list caching does
+ *   is a set of invalidation branches that can be gotten wrong, and its savings — one store read
  *   avoided per write window — are not worth them. An empty list is a valid cached value (`[]`),
  *   not the negative sentinel: "no products in this category" is a fact worth keeping, unlike
  *   "this product does not exist", which a write can change.
@@ -43,9 +54,11 @@ const REQUEST_CACHE_TTL_SECONDS = Number(process.env.REQUEST_CACHE_TTL ?? 10);
  *   ours can reach is the *other* owner's contribution to it (the owner entries users-service
  *   resolved into the cached answer), and that is what the TTL bounds.
  *
- * `?search=` is never cached, and that is a decision rather than an omission: free text cannot
- * form a key (see `requestKey()`), because a key space nobody can enumerate is one nobody can
- * invalidate. Search reads the store every time.
+ * Every key is built from the value its loader filters on, exactly as the request gave it — a
+ * category or id that is not already canonical (`Widgets`, ` 1`) cannot form a key and is served
+ * from the store, uncached. `?search=` is never cached either, and that is a decision rather than
+ * an omission: free text cannot form a key (see `requestKey()`), because a key space nobody can
+ * enumerate is one nobody can invalidate. Search reads the store every time.
  */
 @Injectable()
 export class ProductsService {
@@ -66,8 +79,8 @@ export class ProductsService {
   }
 
   async findOne(id: string, expandOwner = false, noCache = false): Promise<Product | ProductWithOwner> {
-    // The id comes from the URL: one that cannot form a key reads as null and falls back to the
-    // store, which answers 404 — not a 500 from the cache layer.
+    // The id comes from the URL: one that cannot form a key — including a non-canonical spelling
+    // like `%201` — reads as null and falls back to the store, which answers for exactly that id.
     const key = cacheKeyOrNull('product', id);
     const load = async () => products.find((candidate) => candidate.id === id) ?? null;
 
@@ -89,13 +102,13 @@ export class ProductsService {
   }
 
   create(dto: CreateProductDto): Product {
-    const product: Product = { id: String(products.length + 1), ...dto };
+    const product: Product = { id: nextProductId(), ...dto };
     products.push(product);
     this.logger.info(`Created product ${product.id}`, `${CONTEXT}.create`);
 
-    // The new item's key is invalidated too, on purpose: ids in this store are positional, so a
-    // fresh POST can resurrect an id whose *negative* entry ("does not exist") is still live.
-    // A write that skips its own item key leaves a 404 cached for a product that now exists.
+    // The new item's key is invalidated too, on purpose: ids are sequential, so the next one is
+    // predictable, and a read for it before it existed has cached "does not exist". A write that
+    // skips its own item key leaves a 404 cached for a product that now exists.
     this.invalidateAfterWrite(product.id);
     return product;
   }
@@ -111,9 +124,8 @@ export class ProductsService {
     const previous = products[index];
     // ES2022 class-field semantics make the DTO's *unset* optional members own properties with
     // value `undefined`, so a plain spread would write them over the stored values — clearing
-    // every field the caller did not send (and putting `undefined` into `category`, where the
-    // key builder refuses it and the request dies loudly rather than corrupting quietly). Drop
-    // the unset members before merging: an absent field means "leave it", not "blank it".
+    // every field the caller did not send. Drop the unset members before merging: an absent field
+    // means "leave it", not "blank it".
     const applied = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
     products[index] = { ...products[index], ...applied };
     this.logger.info(`Updated product ${id}`, `${CONTEXT}.update`);
@@ -145,8 +157,8 @@ export class ProductsService {
 
   /**
    * The read decision tree, one rung per shape:
-   * search → the store, always; the composite → the request cache, TTL-only; everything else →
-   * the bounded list cache, with owner hydration as a separate read-through per product.
+   * search → the store, always; the composite → the request cache; everything else → the bounded
+   * list cache, with owner hydration as a separate read per product.
    */
   private async readAll(
     search: string | undefined,
@@ -170,12 +182,11 @@ export class ProductsService {
         key: requestKey('productCatalog', CATALOG_ROUTE, { expandOwner: true }),
         load: async () => {
           const list = this.filterFromStore(undefined, undefined);
-          // The parts are read through their own caches with noCache = false: entity and list
-          // entries are invalidated on every write, so cached parts are always *correct* — a
-          // composite recompute never needs to force them fresh. The composite's own key is
-          // invalidated by this service's writes too (invalidateAfterWrite names it); the TTL
-          // bounds what no product write can reach — the owner entries users-service contributed.
-          return this.hydrateOwners(list, false);
+          // The caller's no-cache reaches the parts too. Entity entries are invalidated on write,
+          // but that is "fresh or TTL-bounded", not "always fresh" — a stale fill can outlive an
+          // invalidation by up to its TTL — so a caller who asked for fresh data gets fresh owners,
+          // not a new composite rebuilt from the entries it was trying to get past.
+          return this.hydrateOwners(list, noCache);
         },
         ttlSeconds: REQUEST_CACHE_TTL_SECONDS,
         noCache,
@@ -183,9 +194,10 @@ export class ProductsService {
       });
     }
 
-    // The category comes from the URL: an un-keyable one (a space in it) reads as null and skips
-    // the cache entirely — the store still answers, with the correct (possibly empty) list.
-    const listKey = cacheKeyOrNull('productList', category ?? 'all');
+    // The category comes from the URL: one that cannot form a key (a space in it, or not already
+    // canonical) reads as null and skips the cache entirely — the store still answers, with the
+    // correct (possibly empty) list for exactly the category that was asked for.
+    const listKey = cacheKeyOrNull('productList', listShape(category));
     if (!listKey) {
       this.logger.debug(
         `Category shape '${category}' cannot form a cache key — serving from the store`,
@@ -196,7 +208,7 @@ export class ProductsService {
     }
 
     const list = await this.readThrough.readThrough<Product[]>({
-      // The empty shape is `all`, not an absent id — and `[]` is a valid cached value.
+      // `[]` is a valid cached value: "no products in this category" is a fact, not an absence.
       key: listKey,
       load: async () => this.filterFromStore(undefined, category),
       noCache,
@@ -223,8 +235,10 @@ export class ProductsService {
    * All the calls inherit the same trace id, so the fan-out shows as several
    * products-service → users-service edges under one request. With the shared cache in front,
    * most of those edges are now cache reads rather than HTTP — the N+1 stays visible in traces
-   * while most of its cost moves off the network. noCache threads through because a caller's
-   * freshness demand applies to every owner lookup its request triggers, not the first.
+   * while most of its cost moves off the network. When the cache is down, every one of them is
+   * an HTTP call again: the fail-open path has to be sized for the fan-out, not for one call.
+   * noCache threads through because a caller's freshness demand applies to every owner lookup
+   * its request triggers, not the first.
    */
   private hydrateOwners(
     productsToHydrate: Product[],
@@ -238,15 +252,18 @@ export class ProductsService {
   }
 
   /**
-   * Every list shape that exists right now: one per category in the store, plus `all`.
+   * Every list key that can exist right now: `all`, plus one per category in the store.
    *
    * `extraCategories` names shapes the store can no longer see — the old category of a product
    * that moved, the category of a deleted product — which is exactly when a naive "scan the
-   * store" would skip a key that still has to die.
+   * store" would skip a key that still has to die. A category that cannot form a key is skipped:
+   * every read of it went uncached, so there is no entry to invalidate.
    */
   private listKeys(extraCategories: string[]): string[] {
     const categories = new Set([...products.map((product) => product.category), ...extraCategories]);
-    return [cacheKey('productList', 'all'), ...[...categories].map((c) => cacheKey('productList', c))];
+    return [undefined, ...categories]
+      .map((category) => cacheKeyOrNull('productList', listShape(category)))
+      .filter((key): key is string => key !== null);
   }
 
   /**
@@ -257,18 +274,21 @@ export class ProductsService {
    * reader of *every* shape pays one store read; measured against the alternative's failure
    * mode — a stale list that nothing witnesses — that is a price worth paying until the metrics
    * say otherwise (see the docs for where "otherwise" starts).
+   *
+   * The keys are built inside the deferred callback, not before it: the store write has already
+   * committed, and nothing about building cache keys may turn a committed write into a 500.
    */
   private invalidateAfterWrite(productId: string, extraCategories: string[] = []): void {
-    const keys = [
-      ...this.listKeys(extraCategories),
-      cacheKey('product', productId),
-      // The composite key is deterministic and this service's own — a write here can name it,
-      // so it dies with the rest. Deleting it does not freshen the owner entries users-service
-      // contributed to the *old* answer; it forces the next reader to rebuild the composite
-      // from parts that are, as always, correct-or-absent.
-      requestKey('productCatalog', CATALOG_ROUTE, { expandOwner: true }),
-    ];
     setImmediate(() => {
+      const itemKey = cacheKeyOrNull('product', productId);
+      const keys = [
+        ...this.listKeys(extraCategories),
+        ...(itemKey ? [itemKey] : []),
+        // The composite key is deterministic and this service's own — a write here can name it,
+        // so it dies with the rest. Deleting it does not freshen the owner entries users-service
+        // contributed to the *old* answer; it forces the next reader to rebuild the composite.
+        requestKey('productCatalog', CATALOG_ROUTE, { expandOwner: true }),
+      ];
       void this.cache.delMany(keys).then((removed) => {
         this.logger.debug(
           `Invalidation removed ${removed} cache entr${removed === 1 ? 'y' : 'ies'} after a write to product ${productId} ` +

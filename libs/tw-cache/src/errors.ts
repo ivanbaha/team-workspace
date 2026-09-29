@@ -16,12 +16,15 @@ export class CacheConfigurationError extends Error {
 }
 
 /**
- * Thrown by `addToSet` when the cache server cannot be reached.
+ * Thrown by `addToSet` when the cache server cannot be reached, or does not confirm the add.
  *
  * Set adds are the queue writes of this design, and queue writes fail **closed**: acknowledging
  * an item that was not stored reports work as done that no worker will ever pick up — lost
  * silently, which no retry or reconciliation can notice. Callers map this to 503 so the client
  * knows the request failed, while cache reads in the same process keep failing open.
+ *
+ * "Not confirmed" is not always "not stored": a command that timed out may still have reached the
+ * server. The client is told to retry either way, which is safe — a set add is idempotent.
  */
 export class CacheUnavailableError extends Error {
   constructor(message: string) {

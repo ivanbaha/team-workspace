@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { CacheService } from './cache.service';
 import { ReadThroughService } from './read-through.service';
-import { assertCacheUrl, assertTtlSeconds } from './validate';
+import { assertCacheUrl, assertCommandTimeoutMs, assertTtlSeconds } from './validate';
 import { CacheOptions } from './types';
 
 import type { DynamicModule } from '@nestjs/common';
@@ -31,6 +31,7 @@ export class CacheModule {
   static forRoot(options: ICacheOptions): DynamicModule {
     assertTtlSeconds(options.ttlSeconds, 'ttlSeconds');
     assertTtlSeconds(options.negativeTtlSeconds, 'negativeTtlSeconds');
+    assertCommandTimeoutMs(options.commandTimeoutMs);
     assertCacheUrl(options.url);
 
     const resolved: CacheOptions = Object.assign(new CacheOptions(), {

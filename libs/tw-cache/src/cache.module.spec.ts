@@ -24,7 +24,17 @@ describe('CacheModule.forRoot', () => {
 
     expect(options.ttlSeconds).toBe(60);
     expect(options.negativeTtlSeconds).toBe(30);
+    expect(options.commandTimeoutMs).toBe(250);
     expect(options.url).toBeUndefined();
+  });
+
+  it.each([
+    ['zero', 0],
+    ['fractional', 2.5],
+    ['NaN', Number.NaN],
+    ['a string', '250'],
+  ])('refuses to boot when commandTimeoutMs is %s', (_case, commandTimeoutMs) => {
+    expect(() => resolvedOptions({ logger, commandTimeoutMs } as unknown as ICacheOptions)).toThrow(/commandTimeoutMs/);
   });
 
   it('keeps the provided configuration as given', () => {

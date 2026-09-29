@@ -1,17 +1,17 @@
 import { Body, Controller, HttpCode, Post, ServiceUnavailableException } from '@nestjs/common';
 import { CacheUnavailableError } from '@tw/cache';
 import { RequestRecalculationDto } from './dto/request-recalculation.dto';
-import { RecalculationsService } from './recalculations.service';
+import { QueueFullError, RecalculationsService } from './recalculations.service';
 
 /**
  * Accepts work into the recalculations queue.
  *
  * 202, not 200: the request asks for a recomputation that has not happened yet — the drain is
- * scheduled, and the response says how much of the work was newly queued. The 503 mapping lives
- * in the controller because it is an HTTP concern, not a queue concern: the queue refuses work
- * while the cache is down (`addToSet` fails closed), and reporting "accepted" for work that was
- * never stored would lose it silently — the message says exactly that, so an operator reading the
- * response knows the retry is required, not optional.
+ * scheduled, and the response says how much of the work was newly queued. The 503 mappings live
+ * in the controller because they are HTTP concerns, not queue concerns: the queue refuses work
+ * while the cache cannot confirm the add (`addToSet` fails closed), and refuses work that would
+ * take it past its cap — and reporting "accepted" for either would be a lie the client never
+ * retries. The messages say the retry is required, and that it is safe.
  */
 @Controller('v1/recalculations')
 export class RecalculationsController {
@@ -29,7 +29,14 @@ export class RecalculationsController {
         throw new ServiceUnavailableException({
           code: 'CACHE_UNAVAILABLE',
           message:
-            'The shared cache is unreachable, so the recalculations queue cannot accept work. Nothing was enqueued — retry when the cache is back.',
+            'The shared cache did not confirm the enqueue, so the request is not accepted. Retry when the cache is ' +
+            'back — re-sending a category that did get queued is harmless, because the queue deduplicates.',
+        });
+      }
+      if (error instanceof QueueFullError) {
+        throw new ServiceUnavailableException({
+          code: 'QUEUE_FULL',
+          message: `${error.message} Nothing was enqueued — retry once the queue has drained.`,
         });
       }
       throw error;

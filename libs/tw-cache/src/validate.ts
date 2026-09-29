@@ -1,13 +1,17 @@
 import { CacheConfigurationError } from './errors';
 
 /**
- * Asserts a TTL in the layer's single unit: seconds, as a positive integer.
+ * Asserts a TTL in the layer's single TTL unit: seconds, as a positive integer.
  *
  * Zero is deliberately rejected, not treated as "use the default": on a server configured to
  * evict under memory pressure, an entry with no expiry reads as "never expires on its own", which
  * is how an entry comes to outlive the data it shadows. Someone writing `0` meant something —
  * most often milliseconds, sometimes "off" — and the only safe reading is to make them say which.
  * `undefined` passes: optional fields fall back to their defaults.
+ *
+ * Exported so a service can check the TTLs it reads from its own environment at boot, the same
+ * way `forRoot()` checks the module's — a per-call TTL that is only checked per call fails every
+ * request instead of failing the deploy.
  */
 export function assertTtlSeconds(value: unknown, name: string): void {
   if (value === undefined) return;
@@ -15,7 +19,18 @@ export function assertTtlSeconds(value: unknown, name: string): void {
 
   throw new CacheConfigurationError(
     `\`${name}\` must be a positive integer number of seconds, received ${JSON.stringify(value) ?? String(value)}. ` +
-      'Seconds are the only unit this layer uses; zero is not a TTL but an outage of this check.',
+      'Seconds are the only TTL unit this layer uses; zero is not a TTL but an outage of this check.',
+  );
+}
+
+/** Asserts the per-command deadline: a positive integer number of milliseconds. */
+export function assertCommandTimeoutMs(value: unknown): void {
+  if (value === undefined) return;
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 1) return;
+
+  throw new CacheConfigurationError(
+    `\`commandTimeoutMs\` must be a positive integer number of milliseconds, received ${JSON.stringify(value) ?? String(value)}. ` +
+      'Without a deadline, a connected-but-silent server holds every request that reads the cache.',
   );
 }
 

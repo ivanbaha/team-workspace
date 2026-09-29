@@ -18,7 +18,7 @@ import type { CacheStats } from '../types';
  * argument validation, which is contract, not behaviour.
  */
 export class CacheFake {
-  private readonly entries = new Map<string, { value: unknown; expiresAt: number }>();
+  private readonly entries = new Map<string, { json: string; expiresAt: number }>();
   private readonly sets = new Map<string, Set<string>>();
   private readonly locks = new Map<string, number>();
   private readonly defaults: { ttlSeconds: number; negativeTtlSeconds: number };
@@ -67,7 +67,7 @@ export class CacheFake {
       return null;
     }
     this.hits++;
-    return entry.value as T;
+    return JSON.parse(entry.json) as T;
   }
 
   async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
@@ -75,7 +75,10 @@ export class CacheFake {
     assertTtlSeconds(ttl, 'ttlSeconds');
 
     if (this.unreachable) return;
-    this.entries.set(key, { value: JSON.parse(JSON.stringify(value)), expiresAt: Date.now() + ttl * 1000 });
+    const json = JSON.stringify(value);
+    // Nothing a reader could get back — dropped, as the service drops a store write that fails.
+    if (json === undefined) return;
+    this.entries.set(key, { json, expiresAt: Date.now() + ttl * 1000 });
   }
 
   async del(key: string): Promise<number> {

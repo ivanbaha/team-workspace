@@ -15,10 +15,11 @@ let client: {
   spop: jest.Mock;
   scard: jest.Mock;
   quit: jest.Mock;
+  disconnect: jest.Mock;
 };
 
 function makeStore(handlers: { onUp: () => void; onDown: (message: string) => void } = { onUp: jest.fn(), onDown: jest.fn() }) {
-  return { store: new RedisCacheStore('redis://cache:6379', handlers), handlers };
+  return { store: new RedisCacheStore('redis://cache:6379', 250, handlers), handlers };
 }
 
 const handlersOf = (): Record<string, (payload?: Error) => void> =>
@@ -35,15 +36,20 @@ beforeEach(() => {
     spop: jest.fn(),
     scard: jest.fn(),
     quit: jest.fn().mockResolvedValue('OK'),
+    disconnect: jest.fn(),
   };
   RedisMock.mockImplementation(() => client);
 });
 
 describe('RedisCacheStore', () => {
-  it('connects without an offline queue', () => {
+  it('connects without an offline queue, with a deadline per command, and without re-sending after a reconnect', () => {
     makeStore();
 
-    expect(RedisMock).toHaveBeenCalledWith('redis://cache:6379', { enableOfflineQueue: false });
+    expect(RedisMock).toHaveBeenCalledWith('redis://cache:6379', {
+      enableOfflineQueue: false,
+      commandTimeout: 250,
+      autoResendUnfulfilledCommands: false,
+    });
   });
 
   it('reports availability from the connection events, in both directions', () => {
@@ -58,6 +64,23 @@ describe('RedisCacheStore', () => {
 
     handlersOf().end();
     expect(handlers.onDown).toHaveBeenCalledWith('connection closed');
+  });
+
+  it('treats a close with no error as down — what a cleanly restarting server sends', () => {
+    const handlers = { onUp: jest.fn(), onDown: jest.fn() };
+    makeStore(handlers);
+
+    handlersOf().close();
+
+    expect(handlers.onDown).toHaveBeenCalledWith('connection closed');
+  });
+
+  it('reconnects by dropping the connection and letting the client dial again', () => {
+    const { store } = makeStore();
+
+    store.reconnect();
+
+    expect(client.disconnect).toHaveBeenCalledWith(true);
   });
 
   it('parses the JSON the entries are stored as, and passes a missing key through as null', async () => {
@@ -129,11 +152,21 @@ describe('RedisCacheStore', () => {
     expect(await store.acquireLock('batch', 5)).toBe(false);
   });
 
-  it('quits the client on close', async () => {
+  it('quits the client on close, and stops it reconnecting', async () => {
     const { store } = makeStore();
 
     await store.close();
 
     expect(client.quit).toHaveBeenCalled();
+    expect(client.disconnect).toHaveBeenCalledWith();
+  });
+
+  it('still stops reconnecting when the server is down and QUIT is refused', async () => {
+    const { store } = makeStore();
+    client.quit.mockRejectedValue(new Error("Stream isn't writeable and enableOfflineQueue options is false"));
+
+    await expect(store.close()).resolves.toBeUndefined();
+
+    expect(client.disconnect).toHaveBeenCalledWith();
   });
 });

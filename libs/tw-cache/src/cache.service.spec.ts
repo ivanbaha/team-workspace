@@ -20,6 +20,7 @@ interface FakeClient {
   spop: jest.Mock;
   scard: jest.Mock;
   quit: jest.Mock;
+  disconnect: jest.Mock;
 }
 
 let client: FakeClient;
@@ -56,9 +57,13 @@ beforeEach(() => {
     spop: jest.fn(),
     scard: jest.fn(),
     quit: jest.fn().mockResolvedValue('OK'),
+    disconnect: jest.fn(),
   };
   RedisMock.mockImplementation(() => client);
 });
+
+/** What ioredis rejects a command with once it outlives `commandTimeout`. */
+const timedOut = (): Error => new Error('Command timed out');
 
 describe('CacheService with no URL — the in-process store', () => {
   it('says loudly that nothing is shared, because that is the mode people misread', () => {
@@ -77,10 +82,20 @@ describe('CacheService with no URL — the in-process store', () => {
 });
 
 describe('CacheService with a URL — the shared server', () => {
-  it('connects without an offline queue, so commands cannot pile up against a dead connection', () => {
+  it('connects without an offline queue and with a per-command deadline, so nothing waits on a dead server', () => {
     new CacheService(makeOptions({ url: CACHE_URL }), makeLogger());
 
-    expect(RedisMock).toHaveBeenCalledWith(CACHE_URL, { enableOfflineQueue: false });
+    expect(RedisMock).toHaveBeenCalledWith(CACHE_URL, {
+      enableOfflineQueue: false,
+      commandTimeout: 250,
+      autoResendUnfulfilledCommands: false,
+    });
+  });
+
+  it('passes a configured command deadline through to the client', () => {
+    new CacheService(makeOptions({ url: CACHE_URL, commandTimeoutMs: 100 }), makeLogger());
+
+    expect(RedisMock).toHaveBeenCalledWith(CACHE_URL, expect.objectContaining({ commandTimeout: 100 }));
   });
 
   it('names the server in its boot line without naming the credential', () => {
@@ -241,6 +256,79 @@ describe('CacheService with a URL — the shared server', () => {
       expect(cache.isDisabled).toBe(true);
       expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/connection closed/), 'CacheService');
     });
+
+    it('logs a dropped invalidation at debug, so `removed 0` during an outage can be told apart', async () => {
+      const logger = makeLogger();
+      const cache = new CacheService(makeOptions({ url: CACHE_URL }), logger);
+
+      expect(await cache.del('users-service_user_1')).toBe(0);
+      expect(await cache.delMany(['a', 'b'])).toBe(0);
+
+      const debugLines = (logger.debug as jest.Mock).mock.calls.map(([message]) => message as string);
+      expect(debugLines).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/invalidation of users-service_user_1 dropped/),
+          expect.stringMatching(/invalidation of 2 key\(s\) dropped/),
+        ]),
+      );
+    });
+  });
+
+  describe('a server that is connected but silent', () => {
+    let cache: CacheService;
+    let logger: ITraceLogger;
+
+    beforeEach(() => {
+      logger = makeLogger();
+      cache = new CacheService(makeOptions({ url: CACHE_URL }), logger);
+      emit('ready');
+    });
+
+    it('fails a timed-out read open, like any other failed command', async () => {
+      client.get.mockRejectedValue(timedOut());
+
+      expect(await cache.get('k')).toBeNull();
+      expect(cache.stats.skipped).toBe(1);
+      expect(cache.isDisabled).toBe(false); // one slow command is not an outage
+    });
+
+    it('treats three timeouts in a row as an outage: fails open instantly and reconnects', async () => {
+      client.get.mockRejectedValue(timedOut());
+
+      await cache.get('a');
+      await cache.get('b');
+      await cache.get('c');
+
+      expect(cache.isDisabled).toBe(true);
+      expect(client.disconnect).toHaveBeenCalledWith(true);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/timed out 3 times in a row/), 'CacheService');
+
+      // From here on no request waits out a timeout of its own…
+      client.get.mockClear();
+      expect(await cache.get('d')).toBeNull();
+      expect(client.get).not.toHaveBeenCalled();
+
+      // …until a fresh connection says the server is back.
+      emit('ready');
+      expect(cache.isDisabled).toBe(false);
+    });
+
+    it('resets the count when a command succeeds in between', async () => {
+      client.get.mockRejectedValueOnce(timedOut()).mockRejectedValueOnce(timedOut()).mockResolvedValueOnce(null);
+      client.get.mockRejectedValue(timedOut());
+
+      for (const key of ['a', 'b', 'c', 'd', 'e']) await cache.get(key);
+
+      expect(client.disconnect).not.toHaveBeenCalled();
+      expect(cache.isDisabled).toBe(false);
+    });
+
+    it('refuses a queue write that timed out — the add may or may not have landed, so it is not accepted', async () => {
+      client.sadd.mockRejectedValue(timedOut());
+
+      await expect(cache.addToSet('queue', 'a')).rejects.toThrow(CacheUnavailableError);
+      await expect(cache.addToSet('queue', 'a')).rejects.toThrow(/not confirmed/);
+    });
   });
 
   it('closes the client on shutdown', async () => {
@@ -249,5 +337,18 @@ describe('CacheService with a URL — the shared server', () => {
     await cache.onModuleDestroy();
 
     expect(client.quit).toHaveBeenCalled();
+  });
+
+  it('does not report its own shutdown as an outage', async () => {
+    const logger = makeLogger();
+    const cache = new CacheService(makeOptions({ url: CACHE_URL }), logger);
+    emit('ready');
+
+    await cache.onModuleDestroy();
+    emit('close');
+    emit('end');
+
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/unreachable/), 'CacheService');
+    expect(cache.isDisabled).toBe(true);
   });
 });

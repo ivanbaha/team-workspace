@@ -60,11 +60,14 @@ node .ai/skills/release-mr/scripts/read-versions.mjs --all
 
 ## Step 2: Prepare the branch
 
-Work in the workspace's own `infra/git-ops` — it is part of the meta repo, not a separate
-clone.
+Work in `infra/git-ops` — the `git-ops` entry under `infra` in
+[`configs/workspace-repos.json`](../../../configs/workspace-repos.json), a repository of its own
+cloned into the workspace. Run every git command *in* it with `git -C infra/git-ops`, never
+from the workspace root: the workspace repo does not track a cloned repo's files. (This
+example workspace commits it inline, so the same commands reach the workspace repo there.)
 
 ```bash
-git -C . status --porcelain infra/git-ops
+git -C infra/git-ops status --porcelain -- .
 ```
 
 **If there are uncommitted changes under `infra/git-ops`, stop and ask.** Someone may have a
@@ -73,15 +76,15 @@ release half-prepared. Never stash or discard it to make room.
 Then branch from an up-to-date `main`:
 
 ```bash
-git checkout main
-git pull --ff-only
-git checkout -b release/<version>
+git -C infra/git-ops checkout main
+git -C infra/git-ops pull --ff-only
+git -C infra/git-ops checkout -b release/<version>
 ```
 
 For a `prod` release the branch may already exist from an earlier round — check
-`git branch -a | grep release/` first and check it out rather than creating a second one.
-**Do not merge `main` into an existing release branch**; that pulls in everything that landed
-since, which is exactly the composition QA did not test.
+`git -C infra/git-ops branch -a | grep release/` first and check it out rather than creating
+a second one. **Do not merge `main` into an existing release branch**; that pulls in
+everything that landed since, which is exactly the composition QA did not test.
 
 ---
 
@@ -177,7 +180,7 @@ say so and hand the command to the operator — do not commit unvalidated.
 Then read the diff yourself:
 
 ```bash
-git diff infra/git-ops
+git -C infra/git-ops diff -- .
 ```
 
 It should be *only* `newTag:` lines and the config keys that were approved. Anything else —
@@ -191,8 +194,8 @@ formatter touched the file. Revert it; release diffs are read by people under ti
 Ask for the task code if the user has not given one.
 
 ```bash
-git add infra/git-ops
-git commit -m "chore(<TASK-CODE>): promoted <n> services to <target> for release <version>"
+git -C infra/git-ops add -- .
+git -C infra/git-ops commit -m "chore(<TASK-CODE>): promoted <n> services to <target> for release <version>"
 ```
 
 `chore` is the right type here, and deliberately so: `infra/git-ops` is not a semver-published
@@ -202,11 +205,17 @@ manifests. See [`git-workflow.md`](../../rules/git-workflow.md). Then push with 
 never raw `git push`:
 
 ```txt
-gitlab_safe_push { project_id: <workspace repo id>, branch: "release/<version>", working_dir: <workspace root> }
+gitlab_safe_push { project_id: <git-ops projectId>, branch: "release/<version>", working_dir: <absolute path of infra/git-ops> }
 ```
+
+The `projectId` is the `git-ops` entry's in `configs/workspace-repos.json` — **never invent
+one**; a wrong id pushes a release branch to someone else's repository. Pass `working_dir` as
+an absolute path, because the MCP server resolves a relative one against its own working
+directory, not yours.
 
 Then `gitlab_create_mr`:
 
+- `project_id`: the same `git-ops` id
 - `source_branch`: `release/<version>`
 - `target_branch`: `main`
 - `title`: `chore(<TASK-CODE>): <target> release <version>`

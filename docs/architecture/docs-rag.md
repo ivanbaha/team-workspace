@@ -379,7 +379,8 @@ query time. It lives at `mcp/.docs-index/bm25-model.json`.
 
 That file is the one piece of local state the query path depends on besides
 Qdrant — which is why the startup health check validates it explicitly, and why
-it is the main blocker for a shared remote Qdrant (see *What's next*).
+it is the main blocker for a shared remote Qdrant (see
+[the BM25 blocker](#the-one-non-obvious-blocker-the-bm25-model)).
 
 ### 4. Storage — one collection, two named vectors
 
@@ -635,7 +636,8 @@ someone deciding whether to adopt it.
    would either debounce into minute-long delays anyway or thrash a multi-minute
    CPU job on every keystroke.
 3. **Every developer re-embeds the same corpus.** Wasteful, and it means two
-   machines can hold slightly different indexes. See *What's next*.
+   machines can hold slightly different indexes. See
+   [Scaling](#scaling-when-to-move-the-index-off-developer-machines).
 4. **English-only tokenisation.** `tokenize()` assumes ASCII-ish identifiers and
    Latin script. Fine for this corpus; would need work for CJK content.
 5. **No access control.** Correct today — local stdio MCP, local Qdrant, no
@@ -678,7 +680,42 @@ Note that none of these are about corpus *size* on its own. They are about
 **duplicated work** and **divergence** — which is why the fix is centralisation,
 not a bigger machine.
 
-### The shared, CI-built index
+### Cheaper steps to try first
+
+Centralising is not the only lever, and the others cost far less:
+
+1. **Shrink the corpus.** Most indexes that feel slow are indexing things they
+   should not. Re-read the [hygiene rules](#the-corpus--declared-not-discovered)
+   and `yarn docs:sources` before buying infrastructure — this is free and
+   usually the actual problem.
+2. **Widen the refresh window.** The 24-hour ceiling is a default, not a law.
+3. **Cap ONNX threads** with `OMP_NUM_THREADS` so the ingest spike stops being
+   noticeable, trading rebuild speed for a machine that stays responsive.
+4. **Incremental indexing.** Re-embedding only changed chunks is the real fix
+   for rebuild cost, and it is blocked on BM25 being corpus-wide — IDF and
+   average document length change with any edit. Worth building at a corpus
+   where full rebuilds genuinely hurt; not before.
+
+If the signals persist after these, move up the ladder below — one step at a time.
+
+### The ladder: two steps, each a deployment change
+
+Moving off the laptop is two separate decisions, and the second does not follow from the
+first:
+
+1. **Step 1 — a shared index.** Qdrant becomes one shared instance with CI as its only
+   writer. Everything else — the MCP server, and the credentials every tool call runs under —
+   stays on the developer's machine.
+2. **Step 2 — a shared MCP server.** The server itself moves off the laptop, behind a remote
+   transport. This changes who the tools act *as*, which step 1 never touches.
+
+A team that outgrows the local default usually needs step 1 and nothing more.
+
+### Step 1 — a shared, CI-built index
+
+**Designed, not built, apart from `QDRANT_ENGINE=external`** — the status of each piece is
+listed under [Implemented today, and designed](#implemented-today-and-designed). What follows
+is the design.
 
 Promote Qdrant to a single shared instance and make CI the only writer:
 
@@ -689,6 +726,14 @@ Promote Qdrant to a single shared instance and make CI the only writer:
 - **Read-only readers.** Developer MCP clients query through a gateway that
   validates the team's existing auth and injects a read-only key. Qdrant itself
   stays private, with no public ingress.
+- **The MCP server stays local.** It is still the stdio process each developer's agent
+  starts from the workspace config, and every GitLab, Jira, Grafana and MongoDB call still
+  runs under that developer's own credentials from their `.env`. Only the `docs_search`
+  query crosses the network. This is what makes step 1 cheap: nothing about identity
+  changes.
+- **Queries are still embedded on the laptop.** Qdrant stores and fuses vectors; it does not
+  compute them. The query's dense vector comes from the same local model, so a laptop still
+  downloads it and loads it on first search — it just never ingests.
 - **Set `QDRANT_ENGINE=external`** on developer machines, so nothing tries to
   start or repair a shared instance locally. See
   [Running Qdrant](../guides/qdrant-runtimes.md#external--qdrant-managed-elsewhere).
@@ -700,7 +745,7 @@ Promote Qdrant to a single shared instance and make CI the only writer:
 covers a documentation corpus comfortably. The reason to do this is developer
 experience, not capacity.
 
-### What you give up
+#### What you give up
 
 Being honest about the trade, because it is a real one:
 
@@ -716,7 +761,7 @@ Being honest about the trade, because it is a real one:
 - **A local escape hatch is still required.** Someone editing docs needs to
   search their own edits before merging. Keep local mode working and switchable.
 
-### The one non-obvious blocker: the BM25 model
+#### The one non-obvious blocker: the BM25 model
 
 Query time needs the BM25 model to encode the query's sparse vector, and today
 it is a **local file written by ingest**. Once ingest runs in CI, laptops will
@@ -735,21 +780,68 @@ and skips background ingest entirely — in remote mode a stale index is a CI
 concern surfaced as a clear error, not something a laptop tries to fix. Local
 mode stays the default, so nothing breaks for anyone who does not opt in.
 
-### Cheaper steps to try first
+### Step 2 — a shared MCP server
 
-Centralising is not the only lever, and the others cost far less:
+**Designed, not built — and nothing in the current code path assumes it.** The server speaks
+stdio only (`StdioServerTransport` in `mcp/src/index.js`), reads credentials from the local
+`.env`, and has no notion of who is calling.
 
-1. **Shrink the corpus.** Most indexes that feel slow are indexing things they
-   should not. Re-read the [hygiene rules](#the-corpus--declared-not-discovered)
-   and `yarn docs:sources` before buying infrastructure — this is free and
-   usually the actual problem.
-2. **Widen the refresh window.** The 24-hour ceiling is a default, not a law.
-3. **Cap ONNX threads** with `OMP_NUM_THREADS` so the ingest spike stops being
-   noticeable, trading rebuild speed for a machine that stays responsive.
-4. **Incremental indexing.** Re-embedding only changed chunks is the real fix
-   for rebuild cost, and it is blocked on BM25 being corpus-wide — IDF and
-   average document length change with any edit. Worth building at a corpus
-   where full rebuilds genuinely hurt; not before.
+Step 2 is one server for the whole team, reached over a remote MCP transport (Streamable HTTP)
+instead of being started per laptop. It removes the last per-machine piece — no local Node
+process, no `.env` on every laptop — and it has two costs step 1 does not:
+
+- **An auth layer in front of MCP itself.** Today the only caller is the agent that spawned
+  the process, so there is nothing to authenticate. A network-reachable server that can push
+  branches, approve merge requests and query databases has to know who is calling, and refuse
+  everyone else.
+- **The credentials model changes.** Today every action on the repo host and the tracker is
+  attributable to a person, because it runs under their PAT. A shared server has two options,
+  and neither is free:
+  - **A service account.** Pushes, approvals and ticket edits all happen under a bot
+    identity, and "who approved this MR?" answers "the bot". That is a governance problem
+    before it is a technical one.
+  - **Identity pass-through.** The server exchanges each caller's identity for a per-user
+    token on the repo host, the tracker, Grafana and the databases, and acts as them.
+    Attribution survives — and this is most of the work of step 2.
+
+### What each option costs
+
+| | Local (today) | Step 1 · shared index | Step 2 · shared MCP server |
+| --- | --- | --- | --- |
+| **Compute** | The laptop, on demand; the ingest child's memory is freed on exit | A Qdrant service allocated 24/7 regardless of use; the laptop still embeds queries but never ingests | Qdrant and the MCP server, both allocated 24/7 regardless of use |
+| **Access control** | None needed | A gateway and a read-only key | Auth on MCP itself, plus a credential model |
+| **Operations owner** | Nobody — the laptop self-heals | A stale index is a CI failure that needs an owner and an alert | The same, plus the server's uptime |
+| **Offline** | Works | No | No |
+| **Consistency across machines** | Can diverge | One index | One index |
+| **Onboarding** | Model download and a full embed on the first day | Model download only — queries are still embedded locally | None |
+| **Per-user attribution of actions** | Yes — every call runs under the developer's own PAT | Yes — unchanged | Only with identity pass-through |
+
+### Implemented today, and designed
+
+Stated separately, because a design section that blurs the two gets read as a feature list.
+
+- **Implemented:** `QDRANT_ENGINE=external`. The MCP server and `yarn qdrant` treat Qdrant as
+  managed elsewhere and never try to start or repair it — see
+  [Running Qdrant](../guides/qdrant-runtimes.md#external--qdrant-managed-elsewhere). It is the
+  only piece of remote mode that is code today.
+- **Designed, not built:** the CI job that is the index's only writer; the BM25 model stored
+  in Qdrant; the `DOCS_RAG_REMOTE` flag that turns off the local container start and
+  background ingest; the read-only gateway; and all of step 2, including the remote MCP
+  transport.
+
+### The position
+
+For most teams the local option is the cheapest one. Its
+[footprint](#resource-footprint) — ~176 MB loaded once on first search, CPU only, idle
+between queries — does not load the host, and it needs no service, no owner and no access
+control. The reason to move is **duplicated work and divergence between machines, never
+capacity**.
+
+Each step is a deployment change, not a redesign: the ingest pipeline, the corpus and the
+query path are the same code at every rung, and what step 2 adds sits around the server — a
+transport, an auth layer, a credential model — not inside it. That is why deferring the move
+is safe: a team can take step 1 in the week the signals appear, and step 2 only if it ever
+needs the server itself off the laptop.
 
 ## If you want this in your own team
 

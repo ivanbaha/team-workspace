@@ -1,6 +1,6 @@
 # Workspace MCP Server
 
-Model Context Protocol (MCP) server for team workflow tools. Provides AI agents (like Kiro, Claude Desktop, and VS Code Cline) with tools to interact with GitLab, Jira, Grafana, and MongoDB, and to navigate the team documentation.
+Model Context Protocol (MCP) server for team workflow tools. Provides AI agents with tools to interact with GitLab, Jira, Grafana, and MongoDB, and to navigate the team documentation. Claude Code, GitHub Copilot (VS Code) and Cursor start it from configs committed at the workspace root; Kiro, Claude Desktop and Cline use the absolute-path templates in [`agent-configs/`](./agent-configs/README.md) — see [Connecting to AI Agents](#connecting-to-ai-agents).
 
 Runs as a **stdio-only** MCP server. Configuration is loaded from the workspace root `.env` file using `nestjs-env-getter`.
 
@@ -199,11 +199,41 @@ The reasoning behind each curation decision is in
 
 ## Connecting to AI Agents
 
-Configuration templates for connecting different AI agents are provided under `./mcp/agent-configs/`:
+Every agent gets the same single server entry — `node` running `mcp/src/index.js` — in the
+format its client documents. Where the client supports a project-scoped file that can point at
+the server relative to the workspace root, that file is committed and a fresh clone needs no
+setup beyond `.env` and `yarn install`. Where it does not, a template with an absolute path is
+provided instead. The full per-agent picture — rules pointer, skill wrapper and MCP config
+side by side — is the table in
+[`.ai/README.md`](../.ai/README.md#rules-and-skills--one-source-generated-wrappers).
 
-### Kiro IDE
+| Agent | Config | Path to the server |
+| --- | --- | --- |
+| **Claude Code** | [`.mcp.json`](../.mcp.json) (committed) | Relative — Claude Code starts a project server from the project root |
+| **GitHub Copilot** (VS Code) | [`.mcp.json`](../.mcp.json) (committed) — VS Code reads the portable root file | Relative — VS Code starts a stdio server in the workspace folder |
+| **Cursor** | [`.cursor/mcp.json`](../.cursor/mcp.json) (committed) | `${workspaceFolder}` — Cursor's variable for the project root |
+| **Kiro** | template [`agent-configs/kiro.json`](./agent-configs/kiro.json) | Absolute — Kiro's docs define no workspace variable or relative-path rule |
+| **Claude Desktop** | template [`agent-configs/claude_desktop.json`](./agent-configs/claude_desktop.json) | Absolute — configured outside the repository |
+| **Cline / Roo-Code** | template [`agent-configs/cline.json`](./agent-configs/cline.json) | Absolute — configured outside the repository |
 
-Add the contents of `./mcp/agent-configs/kiro.json` to `.kiro/settings/mcp.json` in your workspace.
+A committed MCP config makes the agent start a process on your machine. **Claude Code asks for
+approval before it uses a server from a project `.mcp.json`, and VS Code starts workspace
+servers only in a trusted workspace** — those prompts are the trust gate, not an
+inconvenience. Review diffs to these files like diffs to a deploy script:
+[Security: automation is code execution](../docs/guides/workspace-automation.md#security-automation-is-code-execution).
+
+### Claude Code, GitHub Copilot, Cursor
+
+Nothing to copy. Open the workspace, approve the `workspace-mcp` server when the client asks,
+and check it connected — `/mcp` in Claude Code, **MCP: List Servers** in VS Code, the
+**Customize** page in Cursor. In Claude Code, `claude mcp reset-project-choices` brings the
+approval prompt back if you declined it.
+
+### Kiro
+
+Add the contents of `./mcp/agent-configs/kiro.json` to `.kiro/settings/mcp.json` in your
+workspace (or `~/.kiro/settings/mcp.json` for every workspace), replacing the placeholder with
+the absolute path of your checkout.
 
 ### Claude Desktop
 
@@ -274,6 +304,7 @@ src/
     ├── search.js     # docs_search hybrid tool implementation
     └── schemas.js    # docs tool schemas
 
+agent-configs/            # absolute-path templates for clients without a workspace config
 scripts/
 ├── ingest-docs.mjs      # build the docs_search index (collect -> chunk -> BM25 -> embed -> swap)
 ├── list-sources.mjs     # print the resolved list of indexed files
@@ -284,6 +315,30 @@ scripts/
 ├── docs-reset.mjs       # delete the index + volume and rebuild from scratch
 └── download-model.mjs   # pre-warm/download the embedding model
 ```
+
+### Adding a tool
+
+A tool's name, description and input schema are sent to the model on every turn, whether or
+not the tool is used. That is the cost behind every point below, and the reason a new
+capability might belong somewhere other than this server at all —
+[Where executable functionality lives](../.ai/README.md#where-executable-functionality-lives)
+decides that first.
+
+- **The description is one sentence saying when to use the tool.** It is what the model reads
+  on every turn. Parameters are described in the input schema — each property's own
+  `description` in `src/<service>/schemas.js` — not in prose in the tool description.
+- **Prefer one tool with a mode parameter to near-duplicates.** When two candidate tools would
+  share a schema, register one and add a parameter that selects the behaviour.
+- **Data-access tools are read-only by default.** The warning under [Features](#features)
+  applies to any new tool that reads a data store, not only to `mongodb_*`.
+- **A tool that a skill will call is named in that skill's `SKILL.md`**, at the step that uses
+  it, so the skill does not depend on the model finding it by description.
+- **Leave it out of `ListTools` when it cannot work.** The Grafana, MongoDB and `docs_search`
+  tools are listed only when their configuration is present — the same pattern keeps an
+  unconfigured tool from costing context for nothing.
+
+The wiring: schema in `src/<service>/schemas.js`, implementation in `src/<service>/tools.js`,
+both registered in `src/index.js`.
 
 ## Further reading
 

@@ -9,7 +9,7 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hasDocMarkdown } from './doc-markdown.mjs';
@@ -38,6 +38,27 @@ export function readRepoConfig() {
  * friction. Placeholders are skipped with an instruction instead.
  */
 export const isPlaceholderRemote = (git) => /(^|[:/])your-org\//.test(git);
+
+/**
+ * Is `dir` the root of a git repository of its own?
+ *
+ * A registered directory can exist without being a clone: this example commits
+ * its services, libraries and infra inline. `git pull` inside such a directory
+ * resolves to the enclosing workspace repo and pulls that instead — once per
+ * entry, on every sync — so those are reported and left alone.
+ */
+function isOwnRepoRoot(dir) {
+  try {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: dir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return realpathSync(top) === realpathSync(dir);
+  } catch {
+    return false;
+  }
+}
 
 function headSha(dir) {
   try {
@@ -81,13 +102,14 @@ function exec(cmd, cwd) {
  * @param {'setup'|'update'} mode  'setup' clones what is missing and leaves
  *   existing repos untouched; 'update' also pulls the ones already on disk.
  * @returns {{cloned:number, pulled:number, skipped:number, failed:number,
+ *            placeholders:number, inline:number,
  *            docsChanged:boolean, docsChangedIn:string[]}}
  */
 export function syncRepos(mode = 'update') {
   const config = readRepoConfig();
   const categories = Object.entries(config);
 
-  const stats = { cloned: 0, pulled: 0, skipped: 0, failed: 0, placeholders: 0, docsChanged: false, docsChangedIn: [] };
+  const stats = { cloned: 0, pulled: 0, skipped: 0, failed: 0, placeholders: 0, inline: 0, docsChanged: false, docsChangedIn: [] };
 
   if (categories.length === 0) {
     log('No repos configured. Nothing to do.');
@@ -129,6 +151,12 @@ export function syncRepos(mode = 'update') {
         continue;
       }
 
+      if (!isOwnRepoRoot(targetDir)) {
+        log(`  INLINE ${name} — committed in this workspace, not a clone of its own; nothing to sync`);
+        stats.inline++;
+        continue;
+      }
+
       if (mode === 'setup') {
         log(`  SKIP  ${name} — already exists`);
         stats.skipped++;
@@ -161,7 +189,7 @@ export function syncRepos(mode = 'update') {
 export function printSummary(stats) {
   log(
     `\nDone. Pulled: ${stats.pulled}  Cloned: ${stats.cloned}  Skipped: ${stats.skipped}` +
-    `  Placeholders: ${stats.placeholders}  Failed: ${stats.failed}`
+    `  Placeholders: ${stats.placeholders}  Inline: ${stats.inline}  Failed: ${stats.failed}`
   );
   if (stats.placeholders > 0) {
     log(`\n${stats.placeholders} repo(s) still point at the "your-org" placeholder.`);

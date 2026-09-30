@@ -3,7 +3,7 @@
     "workspace-mcp": {
       "command": "node",
       "args": [
-        "./mcp/src/index.js"
+        "/REPLACE_WITH_ABSOLUTE_PATH_TO_WORKSPACE/mcp/src/index.js"
       ],
       "autoApprove": [
         "gitlab_get_project_info",

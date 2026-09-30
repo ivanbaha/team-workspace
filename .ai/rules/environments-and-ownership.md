@@ -54,9 +54,8 @@ rules.
 ### Ours
 
 - Everything listed in [`configs/workspace-repos.json`](../../configs/workspace-repos.json)
-  under `frontends`, `backends`, and `libs`.
-- The workspace (meta) repo itself — `docs/`, `scripts/`, `configs/`, `infra/`, `mcp/`,
-  `.ai/`.
+  under `frontends`, `backends`, `libs`, and `infra`.
+- The workspace (meta) repo itself — `docs/`, `scripts/`, `configs/`, `mcp/`, `.ai/`.
 
 Our standards, our conventions, our migrations.
 

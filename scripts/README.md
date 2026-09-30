@@ -17,7 +17,7 @@ Full behavioural reference: [Workspace Automation](../docs/guides/workspace-auto
 | `daily-setup-guard.mjs` | `yarn daily-setup` | Once-per-day flow, run automatically on folder open |
 | `sync-agent-rules.mjs` | `yarn rules:sync` / `rules:check` | Generate the per-agent rule pointers from `.ai/rules/` + `CONTRIBUTING.md` |
 | `sync-skill-wrappers.mjs` | `yarn skills:sync` / `skills:check` | Generate the per-agent skill wrappers from each canonical `SKILL.md`'s frontmatter |
-| [`hooks/`](./hooks/README.md) | wired in `.claude/settings.json` | Four agent guards: secrets, protected branches, docs-index staleness, git-ops overlay builds |
+| [`hooks/`](./hooks/README.md) | wired in `.claude/settings.json` | Five agent hooks: secrets (blocks), protected branches (blocks), docs-index staleness (reports), git-ops overlay builds (reports), docs delivery gate (reports) |
 | `lib/repo-sync.mjs` | — | Shared clone/pull logic + docs-change detection |
 | `lib/docs-ingest.mjs` | — | Shared rebuild decision + foreground ingest runner |
 | `lib/doc-markdown.mjs` | — | The single definition of "documentation markdown" |
@@ -90,7 +90,8 @@ inspect without waiting 20 minutes is a heuristic nobody debugs.
 ## update-workspace.mjs
 
 Day-to-day sync of nested repos. Repo exists → `git pull --ff-only`; repo
-missing → `git clone`.
+missing → `git clone`; directory present but committed inline rather than cloned →
+reported as `INLINE` and left alone.
 
 This script deliberately does **not** rebuild the docs index. The hook that
 calls it decides that separately, based on whether documentation markdown
@@ -155,14 +156,17 @@ tail -f .git/hooks-post-update.log   # a background ingest's only record
 
 Nested repos are declared in
 [configs/workspace-repos.json](../configs/workspace-repos.json), grouped by
-category (`frontends`, `backends`, `libs`). Add an entry:
+category — `frontends`, `backends`, `libs` and `infra`, each a set of repos cloned under the
+directory of the same role. Add an entry:
 
 ```jsonc
 {
   "name": "orders-service",              // directory name AND the label in output
   "description": "REST API — Orders domain",
   "git": "git@github.com:your-org/tw-orders-service.git",
-  "path": "./backend"                    // parent directory, relative to the workspace root
+  "path": "./backend",                   // parent directory, relative to the workspace root
+  "localPath": "backend/orders-service", // path + name — read by the skills, not by setup
+  "projectId": 2004                      // the GitLab project id — copy it from GitLab, never guess
 }
 ```
 
@@ -172,7 +176,7 @@ Then clone it:
 yarn setup     # clones anything missing; existing repos are untouched
 ```
 
-Three things to know:
+Four things to know:
 
 - **`name` is the directory name.** The repo is cloned to `<path>/<name>`,
   regardless of what the remote is called — so `tw-orders-service.git` becomes
@@ -181,6 +185,10 @@ Three things to know:
   skipped with a `TODO` notice rather than failing setup. That is what lets a
   fresh clone of this example workspace run green before anyone has filled in
   real remotes.
+- **A registered directory that is not a clone of its own is left alone.** This example
+  commits its services, libraries and infra inline, so each registered directory exists but
+  resolves to the workspace repo. Sync reports it as `INLINE` instead of running
+  `git pull` inside it — which would pull the workspace itself, once per entry.
 - **A new service's README is indexed automatically.** The docs corpus uses
   `depth: 1` on `frontend/`, `backend/` and `libs/`, so the next ingest picks up
   `backend/orders-service/README.md` with no edit to `sources.js`. Deeper

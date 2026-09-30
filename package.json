@@ -2,7 +2,7 @@
   "name": "team-workspace",
   "version": "1.0.0",
   "private": true,
-  "description": "Monorepo workspace for the development team — frontend microfrontends, backend services, infrastructure, and documentation.",
+  "description": "Example implementation of the AI-native team workspace (meta-repo) pattern. The service, library and infra repositories a real deployment clones in from configs/workspace-repos.json are committed inline here; the yarn workspaces below are a convenience of this all-JavaScript example, not part of the pattern.",
   "workspaces": [
     "frontend/*",
     "backend/*",

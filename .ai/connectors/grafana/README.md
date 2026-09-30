@@ -1,14 +1,14 @@
 # Grafana Connector
 
-Query Grafana/Loki logs from the shell. This is the only connector here that is
-**fully implemented** — the others are still planned — so it is the reference
-for how a connector is expected to behave.
+Query Grafana/Loki logs from the shell. It is the reference for how a connector is
+expected to behave; the register of connectors and the contract they share are in
+[`../README.md`](../README.md).
 
 ## Scripts
 
 | Script | Description |
 | --- | --- |
-| `config.mjs` | Shared config loader — reads `GRAFANA_ENVS` from the root `.env`, falling back to `.ai/connectors/env.json` |
+| `config.mjs` | Shared config loader — reads `GRAFANA_ENVS` from the root `.env` |
 | `get-available.mjs` | List configured environments; `--check` also tests connectivity |
 | `search-logs.mjs` | Search log lines in Loki by service, text, and time range |
 | `trace-id.mjs` | Trace one Trace-Id across every service and reconstruct the call chain |
@@ -62,15 +62,8 @@ in [Tracing a Request](../../../docs/guides/tracing-a-request.md#reading-the-res
 
 ## Output contract
 
-All connectors follow the same contract, which is what makes them usable by any
-agent that can run a shell command:
-
-- **stdout** is JSON, and only JSON.
-- **stderr** carries errors and diagnostics.
-- A non-zero exit code means the command failed.
-
-Keeping diagnostics off stdout is not a style preference — an agent parses
-stdout, so one stray log line there turns a successful call into a parse error.
+JSON on stdout, errors on stderr, non-zero exit on failure — the
+[contract every connector follows](../README.md#output-contract).
 
 ## Credentials
 
@@ -88,8 +81,9 @@ GRAFANA_ENVS='{
 
 ## Connector or MCP tool?
 
-Both are available for Grafana; see [MCP vs Connectors](../../README.md#mcp-vs-connectors-tool-execution-approaches).
-The short version: the MCP tool (`grafana_search_logs`) is the better default
-because the agent gets a typed schema and does not have to remember flags. These
-scripts exist for agents without MCP support, and for running the same query by
-hand while debugging.
+Both are available for Grafana. The MCP tools (`grafana_search_logs`,
+`grafana_trace_id`) are the better default for an agent, because it gets a typed schema and
+does not have to remember flags. These scripts are the CLI face of the same capability — for
+running the query by hand while debugging, and for the `debug-and-report` skill, which names
+them. Why a capability may legitimately have both forms:
+[Where executable functionality lives](../../README.md#where-executable-functionality-lives).

@@ -55,7 +55,7 @@ Agent rule files (`AGENTS.md`, `CLAUDE.md`, `.agents/AGENTS.md`,
 | --- | --- |
 | [`.ai/rules/`](.ai/rules/) | **Canonical rules.** Agent-neutral markdown. This document indexes them. |
 | [`.ai/skills/`](.ai/skills/README.md) | **Canonical skills** — step-by-step procedures for multi-step jobs (review an MR, cut a release, fix a vulnerability). |
-| [`.ai/connectors/`](.ai/README.md) | Standalone Node scripts for external services, run from the shell. |
+| [`.ai/connectors/`](.ai/connectors/README.md) | Repo-local Node scripts for external services, run from the shell. Where a new executable capability goes — MCP tool, connector, skill-local script or existing CLI — is decided in [`.ai/README.md`](.ai/README.md#where-executable-functionality-lives). |
 | [`mcp/`](mcp/README.md) | The MCP server: GitLab, Jira, Grafana, MongoDB tools plus hybrid docs search. |
 | [`docs/`](docs/README.md) | Team knowledge, indexed for `docs_search`. |
 | [`docs/sdlc/`](docs/sdlc/README.md) | **How work flows** from idea to verified change — the four phases, their owners, and the hand-offs. |
@@ -151,7 +151,9 @@ Edit [`.ai/rules/`](.ai/rules/) and this file. Never edit a pointer file directl
 - **A skill** → `.ai/skills/<name>/SKILL.md` plus the four thin wrappers, then a row in
   [`.ai/skills/README.md`](.ai/skills/README.md). Run `yarn skills:check` to verify the
   wrappers exist.
-- **A connector** → `.ai/connectors/<service>/`, credentials shape added to `example.env`.
+- **A connector** → only when the [placement rule](.ai/README.md#where-executable-functionality-lives)
+  says so: `.ai/connectors/<service>/`, variables added to `example.env`, a row in the
+  [register](.ai/connectors/README.md#the-register).
 - **A doc** → the right folder under `docs/`, linked from that folder's `README.md` and from
   [`docs/README.md`](docs/README.md). Say that the search index is stale for it.
 - **A repo** → an entry in `configs/workspace-repos.json` with `projectId` and `localPath`.

@@ -220,7 +220,7 @@ Tell the user clearly what was checked and what was ruled out. Then suggest conc
 
 If the user agrees, draft the ticket and show it to the user before creating. Ask the user to confirm or adjust any fields.
 
-Use the Jira connector (`.ai/connectors/jira/`) with the following conventions:
+Use the `jira_issue_create` MCP tool with the following conventions:
 
 ### Summary Format
 

@@ -1,6 +1,6 @@
 /**
  * Grafana connector — shared config loader.
- * Reads credentials from the root `.env` file first, falling back to `.ai/connectors/env.json`.
+ * Reads credentials from the root `.env` file, the same one the MCP server reads.
  *
  * Usage: imported by other grafana scripts.
  */

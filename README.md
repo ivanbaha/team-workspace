@@ -1,6 +1,34 @@
 # Team Workspace
 
-Central monorepo for the development team. All frontend microfrontends, backend services, infrastructure configs, and shared documentation live here.
+This repository is the example implementation of the **AI-native team workspace (meta-repo)**
+pattern. In a real deployment the directories under `backend/`, `frontend/`, `libs/` and
+`infra/` are **separate git repositories**, cloned into this tree by `yarn setup` from
+[`configs/workspace-repos.json`](./configs/workspace-repos.json), each keeping its own history,
+CI and deployment lifecycle. The workspace around them — rules, skills, hooks, the MCP server
+and the team docs — is what this repository itself contains.
+
+Here those repositories are **committed inline**, so a fresh clone runs green with no remotes
+to configure: the registry entries still point at `your-org`, and sync leaves every one alone —
+reported as inline where the directory is committed here, skipped as a placeholder where it is
+not ([how](./scripts/README.md#adding-a-new-repo-to-the-workspace)).
+
+The `workspaces` block in the root `package.json` is a convenience of an **all-JavaScript
+example**, not part of the pattern. The meta-repo does not require its repositories to share a
+build system; a polyglot estate keeps per-repository builds.
+
+---
+
+## What this repository demonstrates
+
+Each published architecture below points back here, and each row names what of it lives in
+this tree.
+
+| Architecture | What of it lives here |
+| --- | --- |
+| [RA-003 · AI-Native Team Workspace](https://archtenet.dev/docs/reference-architectures/ra-003-ai-native-meta-repo) | The workspace itself: [`.ai/`](./.ai/README.md), [`mcp/`](./mcp/README.md), [`scripts/`](./scripts/README.md), the generated agent files, [`docs/`](./docs/README.md) |
+| [RA-004 · Log-Based Distributed Tracing](https://archtenet.dev/docs/reference-architectures/ra-004-log-based-tracing) | [`libs/tw-tracing`](./libs/tw-tracing/README.md), [`libs/tw-logger`](./libs/tw-logger/README.md), [`libs/tw-http-connector`](./libs/tw-http-connector/README.md), [`mcp/src/grafana/trace/`](./mcp/src/grafana/trace/) |
+| [RA-005 · Lightweight Spec-Driven Development](https://archtenet.dev/docs/reference-architectures/ra-005-lightweight-sdd) | [`docs/sdlc/`](./docs/sdlc/README.md), [`docs/SPECs/`](./docs/SPECs/README.md), [`docs/tasks/`](./docs/tasks/README.md), the lifecycle skills [`plan-task`](./.ai/skills/plan-task/SKILL.md), [`author-spec`](./.ai/skills/author-spec/SKILL.md), [`implement-task`](./.ai/skills/implement-task/SKILL.md) and [`review-mr`](./.ai/skills/review-mr/SKILL.md), [`work-triage.md`](./.ai/rules/work-triage.md), [`requirements-and-estimates.md`](./.ai/rules/requirements-and-estimates.md) |
+| [RA-006 · Appropriate Caching](https://archtenet.dev/docs/reference-architectures/ra-006-appropriate-caching) | [`libs/tw-cache`](./libs/tw-cache/README.md), [`backend/products-sync-service`](./backend/products-sync-service/README.md), [`infra/git-ops/base/cache/`](./infra/git-ops/base/cache/) |
 
 ---
 
@@ -68,7 +96,7 @@ yarn gitops:validate     # do all three overlays still build?
   - [daily-setup-guard.mjs](./scripts/daily-setup-guard.mjs) — Once-per-day flow, triggered on folder open
   - [sync-agent-rules.mjs](./scripts/sync-agent-rules.mjs) — Generate the per-agent rule pointers (`yarn rules:sync`)
   - [sync-skill-wrappers.mjs](./scripts/sync-skill-wrappers.mjs) — Generate the per-agent skill wrappers (`yarn skills:sync`)
-  - [hooks/](./scripts/hooks/README.md) — Agent guards: secrets, protected branches, docs-index staleness, overlay builds
+  - [hooks/](./scripts/hooks/README.md) — Agent hooks: secrets, protected branches, docs-index staleness, overlay builds, docs delivery gate
 - [.githooks/](./.githooks/) — Tracked git hooks: `post-merge`, `post-rewrite`, and the shared `post-update.mjs` they delegate to
 - [configs/workspace-repos.json](./configs/workspace-repos.json) — Repo registry: git remote, local path, and project ID for each repo
 - [.vscode/tasks.json](./.vscode/tasks.json) — `folderOpen` task that runs the daily guard, plus docs-index tasks
@@ -170,10 +198,20 @@ To set up the MCP server:
    cd mcp && yarn install
    ```
 
-3. **Configure Your Agent/IDE**:
-   - **Kiro IDE**: Copy the configuration template from `mcp/agent-configs/kiro.json` into `.kiro/settings/mcp.json` in your workspace.
-   - **Claude Desktop**: Copy the block from `mcp/agent-configs/claude_desktop.json` to your Claude Desktop config file (substituting your actual workspace path).
-   - **VS Code Cline**: Copy the block from `mcp/agent-configs/cline.json` to your Cline MCP settings (substituting your actual workspace path).
+3. **Connect Your Agent/IDE**:
+   - **Claude Code**, **GitHub Copilot (VS Code)**: nothing to copy — both read the committed
+     [`.mcp.json`](./.mcp.json). Approve the `workspace-mcp` server when the client asks;
+     that prompt is the trust gate for a file that starts a process on your machine.
+   - **Cursor**: nothing to copy — it reads the committed [`.cursor/mcp.json`](./.cursor/mcp.json).
+   - **Kiro**, **Claude Desktop**, **Cline**: copy the block from the matching template in
+     [`mcp/agent-configs/`](./mcp/agent-configs/README.md) into the client's settings,
+     substituting the absolute path of your checkout.
+   - **Antigravity**: no committed config — add the server in its MCP settings with an
+     absolute path.
+
+   The per-agent table — rules pointer, skill wrapper, MCP config — is in
+   [`.ai/README.md`](./.ai/README.md#rules-and-skills--one-source-generated-wrappers); exact
+   config locations are in [Connecting to AI Agents](./mcp/README.md#connecting-to-ai-agents).
 4. **(Optional) Enable Hybrid Docs Search**:
    - Start Docker Desktop or the local daemon.
    - In your `.env`, set `DOCS_SEARCH_ENABLED=true` and `QDRANT_ENGINE='docker'`.
@@ -320,6 +358,8 @@ a tool event.
 > The same review habit that applies to `.vscode/tasks.json` and `.githooks/` applies here:
 > treat a diff to it like a diff to a deploy script, and keep every hook a one-line call into a
 > tracked script under `scripts/hooks/` so the real logic goes through normal code review.
+> The committed MCP configs — `.mcp.json` and `.cursor/mcp.json` — are the same class of file:
+> each makes an agent start a process on your machine.
 
 ---
 
@@ -367,7 +407,7 @@ corpus.
 > cat .vscode/tasks.json                 # what runs on folder open
 > git config core.hooksPath              # expect: .githooks
 > ls -la .git/hooks/                     # NOT tracked — local-only additions
-> git log --oneline -- .githooks .vscode/tasks.json | head
+> git log --oneline -- .githooks .vscode/tasks.json .claude/settings.json .mcp.json .cursor/mcp.json | head
 > ```
 >
 > If you clone widely, leave the setting off and run `yarn daily-setup` by hand.

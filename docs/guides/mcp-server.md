@@ -6,7 +6,7 @@ This guide describes how to configure, run, and develop the Workspace MCP Server
 
 ## Architecture Overview
 
-The MCP Server runs in Node.js (v22+) as a standard input/output (stdio) subprocess spawned by your AI Agent (e.g. Kiro IDE, Claude Desktop, or Cline).
+The MCP Server runs in Node.js (v22+) as a standard input/output (stdio) subprocess spawned by your AI agent. Which config file starts it for each agent is listed in [Connecting to AI Agents](../../mcp/README.md#connecting-to-ai-agents).
 
 ```mermaid
 graph TD
@@ -81,7 +81,7 @@ Without any extra dependencies, the MCP server provides:
 
 ## Option 2: Hybrid Docs Search (Opt-in)
 
-The `docs_search` tool uses a local Qdrant vector database and Transformers.js to perform semantic and keyword retrieval over all team docs, Monorepo library READMEs, and deployment manuals.
+The `docs_search` tool uses a local Qdrant vector database and Transformers.js to perform semantic and keyword retrieval over all team docs, service and library READMEs, and deployment manuals.
 
 ### How to Enable
 
@@ -139,20 +139,10 @@ This starts the stdio server inside the Model Context Protocol Inspector UI, all
 
 ---
 
-## Tool Execution Paradigms: MCP Server vs Connectors
+## MCP Tools, Connectors, and Where New Functionality Goes
 
-The workspace supports two parallel execution paradigms to provide agents with capabilities:
-
-1. **Model Context Protocol (MCP)**: Persistent stdio-based server that registers tools inside the agent system context (defined in `./mcp`).
-2. **Connectors**: Individual shell scripts executed by the agent via CLI command-line parameters (defined in `.ai/connectors`).
-
-These can run independently or simultaneously. Both approaches load credentials from the **root `.env` file** to centralise environment variable maintenance.
-
-### Decision Matrix: When to use MCP vs Connectors
-
-| Criteria | MCP Server | Connectors |
-| --- | --- | --- |
-| **Primary Use Case** | Frequently-used, general-purpose workflows (e.g., fetching Jira issue details, listing GitLab MRs). | One-off, highly-specialised or skill-specific actions (e.g., running a specific database migration, compiling a special localized report). |
-| **Discovery** | Automated. The agent discovers all schemas on server boot. | Manual. The agent lists directory files, reads README instructions, and runs scripts. |
-| **Model Context Impact** | Permanently consumes prompt tokens since all schemas are sent in the LLM's system instructions. | Dynamic. Connectors are only read and executed when needed, but locating/describing them can steal prompt tokens during file exploration. |
-| **Implementation Complexity** | Requires registering tool schemas and request switch handlers. | Simple self-contained Node.js `.mjs` scripts. |
+The MCP server is one of four places an agent reaches executable functionality — alongside
+connectors, skill-local scripts and third-party CLIs — and the tools here share the root `.env`
+with the connectors. Which of the four a new capability belongs in, and what each costs the
+agent's context, is decided in one place:
+[Where executable functionality lives](../../.ai/README.md#where-executable-functionality-lives).

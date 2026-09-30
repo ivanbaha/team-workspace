@@ -264,17 +264,20 @@ developer's first action of the day.
 Everything on this page runs code on your machine without asking. That is the
 point — and it is also a real risk worth stating plainly rather than burying.
 
-Two mechanisms here execute code automatically:
+Three mechanisms here execute code automatically:
 
 | Mechanism | Runs when | Enabled by |
 |---|---|---|
 | **`folderOpen` task** | Every time the folder is opened in the editor | `"task.allowAutomaticTasks": "on"` in **user** settings |
 | **Git hooks** | Every `git pull` / `git merge` / rebase | `git config core.hooksPath .githooks` |
+| **Project MCP configs** | Every time an agent that reads them starts in the workspace | Approving the server in Claude Code; trusting the workspace in VS Code; Cursor documents no separate prompt for project servers — see [below](#committed-mcp-configs--the-approval-prompt-is-the-gate) |
 
-Both read their definitions from **version-controlled files** — `.vscode/tasks.json`
-and `.githooks/`. That is what makes the automation shareable, and it is exactly
-what makes it a supply-chain surface: *anyone who can land a commit can change
-what runs on your machine.*
+All three read their definitions from **version-controlled files** — `.vscode/tasks.json`,
+`.githooks/`, and the MCP configs `.mcp.json` and `.cursor/mcp.json`. That is what makes
+the automation shareable, and it is exactly what makes it a supply-chain surface:
+*anyone who can land a commit can change what runs on your machine.* The agent hooks
+wired in `.claude/settings.json` are the same class of file — see
+[Agent Hooks](../../scripts/hooks/README.md).
 
 ### The realistic threat
 
@@ -300,7 +303,8 @@ The setting is per-machine and cannot be granted by a workspace — that is a
 deliberate safety boundary, not an inconvenience. Having accepted it, take on
 the review habit that goes with it:
 
-- **Review `.vscode/tasks.json` and `.githooks/` in every PR that touches them,
+- **Review `.vscode/tasks.json`, `.githooks/`, `.claude/settings.json` and the MCP
+  configs (`.mcp.json`, `.cursor/mcp.json`) in every PR that touches them,
   properly.** These are not config files in the "formatting preferences" sense.
   Treat a diff to them the way you would treat a diff to a deploy script. It is
   worth a CODEOWNERS entry so they cannot be changed without a named reviewer.
@@ -316,7 +320,11 @@ the review habit that goes with it:
   git config core.hooksPath          # expect: .githooks
   ls -la .githooks/                  # tracked, reviewable
   ls -la .git/hooks/                 # NOT tracked — anything here is local-only
-  git log --oneline -- .githooks .vscode/tasks.json | head
+
+  # What will an agent start, and what runs on its tool calls?
+  cat .mcp.json .cursor/mcp.json .claude/settings.json
+
+  git log --oneline -- .githooks .vscode/tasks.json .claude/settings.json .mcp.json .cursor/mcp.json | head
   ```
 
   That last command is the useful one: it shows who changed the automation and
@@ -332,6 +340,27 @@ the review habit that goes with it:
 - **Keep editor Workspace Trust enabled.** It is the backstop that prevents an
   unopened, untrusted folder from executing anything, and it is the reason
   "restricted mode" exists.
+
+### Committed MCP configs — the approval prompt is the gate
+
+`.mcp.json` (read by Claude Code and by VS Code for Copilot) and `.cursor/mcp.json` are
+committed so a fresh clone gives each agent the workspace tools without setup — the per-agent
+list is in [`.ai/README.md`](../../.ai/README.md#rules-and-skills--one-source-generated-wrappers).
+Each names a command the agent will run on your machine.
+
+- **Claude Code asks for approval before it uses a server from a project `.mcp.json`.** That
+  prompt is the trust gate, not an inconvenience: read the `command` and `args` before
+  accepting. `claude mcp reset-project-choices` brings the prompt back when you want to review
+  again. A cloned repository cannot approve its own servers — Claude Code ignores
+  `enableAllProjectMcpServers` and `enabledMcpjsonServers` committed to a project's
+  `.claude/settings.json` until you trust the folder — and neither setting belongs in this
+  repository's settings: once the folder is trusted, it would approve whatever the next change
+  to `.mcp.json` names, for everyone.
+- **VS Code starts the servers in `.mcp.json` and `.vscode/mcp.json` only in a trusted
+  workspace, and does not prompt again when their configuration changes.** Workspace Trust is
+  the only gate there — one more reason to keep it enabled.
+- **Review `.cursor/mcp.json` the same way.** Cursor's documentation describes no separate
+  prompt for project servers, so reviewing the diff is the gate.
 
 ### Why this workspace is still built this way
 

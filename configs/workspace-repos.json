@@ -42,6 +42,14 @@
       "path": "./backend",
       "localPath": "backend/products-service",
       "projectId": 2002
+    },
+    {
+      "name": "products-sync-service",
+      "description": "Background worker — Products domain: recomputes per-category aggregates through the shared cache's work queue, and serves the stats it produces",
+      "git": "git@github.com:your-org/tw-products-sync-service.git",
+      "path": "./backend",
+      "localPath": "backend/products-sync-service",
+      "projectId": 2003
     }
   ],
   "libs": [
@@ -100,6 +108,24 @@
       "path": "./libs",
       "localPath": "libs/tw-config",
       "projectId": 3007
+    },
+    {
+      "name": "tw-cache",
+      "description": "Shared cache client — read-through for owners, direct reads for consumers, and the sets and locks background workers use as a work queue",
+      "git": "git@github.com:your-org/tw-cache.git",
+      "path": "./libs",
+      "localPath": "libs/tw-cache",
+      "projectId": 3008
+    }
+  ],
+  "infra": [
+    {
+      "name": "git-ops",
+      "description": "GitOps manifests — one base, three overlays (dev, test, prod), and the pinned version of every service: the record of what is deployed where",
+      "git": "git@github.com:your-org/tw-git-ops.git",
+      "path": "./infra",
+      "localPath": "infra/git-ops",
+      "projectId": 4001
     }
   ]
 }

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "workspace-mcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp/src/index.js"]
+    }
+  }
+}
